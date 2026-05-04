@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Send, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { ChatMessage } from "./ChatMessage";
 import { TokenStats } from "./TokenStats";
 import { PromptInspector } from "./PromptInspector";
@@ -16,14 +24,29 @@ interface Props {
   initialMessages?: ChatMessageT[];
   onSessionUpdate?: (messages: ChatMessageT[]) => void;
   onFileBlocks?: (files: ArtifactFile[]) => void;
+  onRenameSession?: (title: string) => void;
+  sessionTitle?: string;
 }
 
-export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpdate, onFileBlocks }: Props) {
+export function ChatPanel({
+  model,
+  mockMode,
+  initialMessages = [],
+  onSessionUpdate,
+  onFileBlocks,
+  onRenameSession,
+  sessionTitle = "",
+}: Props) {
   const [messages, setMessages] = useState<ChatMessageT[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lastPrompt, setLastPrompt] = useState<AssembledPrompt | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+
+  // Rename dialog state
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,6 +59,42 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
       onSessionUpdate?.(next);
       return next;
     });
+  }
+
+  // --- Message actions ---
+  function handleDelete(id: string) {
+    updateMessages((prev) => prev.filter((m) => m.id !== id));
+  }
+
+  function handleDuplicate(id: string) {
+    updateMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === id);
+      if (idx === -1) return prev;
+      const copy: ChatMessageT = { ...prev[idx], id: crypto.randomUUID(), createdAt: Date.now() };
+      return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)];
+    });
+  }
+
+  function handleSaveAs(msg: ChatMessageT) {
+    const header = `# ${msg.role === "user" ? "User" : "Assistant"} message\n\n`;
+    const blob = new Blob([header + msg.content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `message-${msg.id.slice(0, 8)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function openRename() {
+    setRenameValue(sessionTitle);
+    setRenameOpen(true);
+  }
+
+  function commitRename() {
+    const t = renameValue.trim();
+    if (t) onRenameSession?.(t);
+    setRenameOpen(false);
   }
 
   async function send() {
@@ -136,6 +195,10 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
                   setInspectorOpen(true);
                 }
               }}
+              onDelete={() => handleDelete(m.id)}
+              onDuplicate={() => handleDuplicate(m.id)}
+              onSaveAs={() => handleSaveAs(m)}
+              onRename={onRenameSession ? openRename : undefined}
             />
           ))
         )}
@@ -170,6 +233,30 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
       </div>
 
       <PromptInspector open={inspectorOpen} onClose={() => setInspectorOpen(false)} prompt={lastPrompt} />
+
+      {/* Rename chat dialog */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Rename chat</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commitRename(); }}
+            className="text-sm"
+            autoFocus
+          />
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => setRenameOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={commitRename} disabled={!renameValue.trim()}>
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -228,6 +228,13 @@ const Index = () => {
                   initialMessages={activeSession.messages}
                   onSessionUpdate={handleSessionUpdate}
                   onFileBlocks={handleFileBlocks}
+                  sessionTitle={activeSession.title}
+                  onRenameSession={(title) => {
+                    const updated = { ...activeSession, title, updatedAt: Date.now() };
+                    setActiveSession(updated);
+                    saveSession(updated, activeWorkspace);
+                    setSessions(loadSessions(activeWorkspace));
+                  }}
                 />
               </Panel>
               {showArtifact && artifactFiles.length > 0 && (
