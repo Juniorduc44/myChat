@@ -52,6 +52,16 @@ export interface WorkspaceFile {
   path: string;
   kind: WorkspaceFileKind;
   lines: number;
+  bytes?: number;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  model: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface BackendStatus {
@@ -59,4 +69,24 @@ export interface BackendStatus {
   ollamaInstalled: boolean;
   models: string[];
   port?: number;
+  gpuAvailable?: boolean;
 }
+
+export interface SubmoduleStatus {
+  path: string;
+  commit: string;
+  status: "clean" | "updated" | "missing" | "conflict" | "unknown";
+  tag: string;
+}
+
+export interface GitStatus {
+  branch: string;
+  commit: string;
+  commitMsg: string;
+  submodules: SubmoduleStatus[];
+}
+
+export type SelectedView =
+  | { type: "file"; file: WorkspaceFile }
+  | { type: "update" }
+  | null;

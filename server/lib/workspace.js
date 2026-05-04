@@ -1,5 +1,5 @@
 // server/lib/workspace.js — load workspace.json, list files, read files safely.
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, existsSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULTS = {
@@ -64,4 +64,10 @@ function safe(dir, p) {
 
 export function readWorkspaceFile(dir, p) {
   return readFileSync(safe(dir, p), "utf8");
+}
+
+export function writeWorkspaceFile(dir, p, content) {
+  const full = safe(dir, p);
+  mkdirSync(path.dirname(full), { recursive: true });
+  writeFileSync(full, content, "utf8");
 }

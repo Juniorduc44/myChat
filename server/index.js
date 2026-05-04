@@ -20,11 +20,12 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import open from "open";
 
-import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile } from "./lib/workspace.js";
+import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile } from "./lib/workspace.js";
 import { searchFTS } from "./lib/retrieval.js";
 import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 const WORKSPACE_DIR =
   process.env.OLLAMA_CHAT_WORKSPACE ||
@@ -60,6 +61,20 @@ async function ollamaModels() {
   }
 }
 
+async function detectGpu() {
+  // NVIDIA
+  try {
+    await execa("nvidia-smi", ["--query-gpu=name", "--format=csv,noheader"], { timeout: 1500 });
+    return true;
+  } catch { /* not found */ }
+  // AMD ROCm
+  try {
+    await execa("rocm-smi", ["--showproductname"], { timeout: 1500 });
+    return true;
+  } catch { /* not found */ }
+  return false;
+}
+
 // Streams ollama generation. Uses `ollama run --nowordwrap` and pipes stdout.
 function streamOllama(model, prompt, onChunk) {
   return new Promise((resolve, reject) => {
@@ -75,12 +90,13 @@ function streamOllama(model, prompt, onChunk) {
 
 // --- Routes ---------------------------------------------------------------
 fastify.get("/api/status", async () => {
-  const installed = await ollamaInstalled();
+  const [installed, gpuAvailable] = await Promise.all([ollamaInstalled(), detectGpu()]);
   const models = installed ? await ollamaModels() : [];
   return {
     reachable: true,
     ollamaInstalled: installed,
     models,
+    gpuAvailable,
     port: PORT,
     workspace: WORKSPACE_DIR,
     defaultModel: DEFAULT_MODEL,
@@ -139,6 +155,113 @@ fastify.post("/api/chat", async (req, reply) => {
     reply.raw.write(JSON.stringify({ type: "error", message: e.message }) + "\n");
   } finally {
     reply.raw.end();
+  }
+});
+
+// PUT /api/file — save a workspace file
+fastify.put("/api/file", async (req, reply) => {
+  const { path: p, content } = req.body ?? {};
+  if (!p || content === undefined) return reply.code(400).send({ error: "path and content required" });
+  try {
+    writeWorkspaceFile(WORKSPACE_DIR, p, content);
+    return { ok: true };
+  } catch (e) {
+    return reply.code(400).send({ error: e.message });
+  }
+});
+
+// POST /api/models/pull — stream `ollama pull <model>` progress
+fastify.post("/api/models/pull", async (req, reply) => {
+  const { model } = req.body ?? {};
+  if (!model?.trim()) return reply.code(400).send({ error: "model required" });
+  reply.raw.setHeader("content-type", "application/x-ndjson");
+  reply.raw.setHeader("cache-control", "no-cache");
+  const write = (obj) => reply.raw.write(JSON.stringify(obj) + "\n");
+  try {
+    const sub = execa("ollama", ["pull", model.trim()], { buffer: false });
+    sub.stdout.on("data", (b) => write({ type: "progress", text: b.toString("utf8").trim() }));
+    sub.stderr.on("data", (b) => write({ type: "progress", text: b.toString("utf8").trim() }));
+    await new Promise((resolve, reject) => {
+      sub.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`exited ${code}`))));
+      sub.on("error", reject);
+    });
+    write({ type: "done" });
+  } catch (e) {
+    write({ type: "error", message: e.message });
+  } finally {
+    reply.raw.end();
+  }
+});
+
+// GET /api/git-status — current branch, commit, submodule status
+fastify.get("/api/git-status", async () => {
+  const git = (args) =>
+    execa("git", args, { cwd: REPO_ROOT, timeout: 5000 })
+      .then(({ stdout }) => stdout.trim())
+      .catch(() => "");
+  const [branch, commit, commitMsg, subOut] = await Promise.all([
+    git(["branch", "--show-current"]),
+    git(["rev-parse", "--short", "HEAD"]),
+    git(["log", "-1", "--format=%s"]),
+    git(["submodule", "status"]),
+  ]);
+  const submodules = subOut
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      // Format: [<status>]<sha1> <path> [(<description>)]
+      // Status char may be missing from the start after stdout.trim() on the first line.
+      const m = line.match(/^([ +\-U]?)([0-9a-f]{40})\s+(\S+)(?:\s+\((.+)\))?/);
+      if (!m) return { path: line.trim(), commit: "", status: "unknown", tag: "" };
+      const statusMap = { " ": "clean", "": "clean", "+": "updated", "-": "missing", U: "conflict" };
+      return { path: m[3], commit: m[2].slice(0, 7), status: statusMap[m[1]] ?? "unknown", tag: m[4] ?? "" };
+    });
+  return { branch, commit, commitMsg, submodules };
+});
+
+// POST /api/update — stream git pull --recurse-submodules + npm installs
+fastify.post("/api/update", async (req, reply) => {
+  reply.raw.setHeader("content-type", "application/x-ndjson");
+  reply.raw.setHeader("cache-control", "no-cache");
+  const write = (obj) => reply.raw.write(JSON.stringify(obj) + "\n");
+
+  async function runStep(label, cmd, args, cwd = REPO_ROOT) {
+    write({ type: "step", label });
+    const sub = execa(cmd, args, { cwd, buffer: false });
+    const pipe = (b) => {
+      const lines = b.toString("utf8").split("\n").filter(Boolean);
+      lines.forEach((l) => write({ type: "line", text: l }));
+    };
+    sub.stdout?.on("data", pipe);
+    sub.stderr?.on("data", pipe);
+    await new Promise((resolve, reject) => {
+      sub.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
+      sub.on("error", reject);
+    });
+  }
+
+  try {
+    await runStep("Fetching remotes…", "git", ["fetch", "--recurse-submodules"]);
+    await runStep("Pulling main repo…", "git", ["pull", "--recurse-submodules"]);
+    await runStep("Updating submodules to latest…", "git", ["submodule", "update", "--remote", "--merge"]);
+    await runStep("npm install (root)…", "npm", ["install"]);
+    await runStep("npm install (server)…", "npm", ["install"], path.join(REPO_ROOT, "server"));
+    write({ type: "done" });
+  } catch (e) {
+    write({ type: "error", message: e.message });
+  } finally {
+    reply.raw.end();
+  }
+});
+
+// DELETE /api/models/:model — remove a local model
+fastify.delete("/api/models/:model", async (req, reply) => {
+  const { model } = req.params;
+  try {
+    await execa("ollama", ["rm", model], { timeout: 10000 });
+    return { ok: true };
+  } catch (e) {
+    return reply.code(500).send({ error: e.message });
   }
 });
 

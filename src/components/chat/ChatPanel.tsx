@@ -6,15 +6,18 @@ import { ChatMessage } from "./ChatMessage";
 import { TokenStats } from "./TokenStats";
 import { PromptInspector } from "./PromptInspector";
 import { assemblePrompt, mockStream, mockTokenCount } from "@/lib/mockOllama";
+import { chatStream } from "@/lib/api";
 import type { ChatMessage as ChatMessageT, AssembledPrompt } from "@/lib/types";
 
 interface Props {
   model: string;
   mockMode: boolean;
+  initialMessages?: ChatMessageT[];
+  onSessionUpdate?: (messages: ChatMessageT[]) => void;
 }
 
-export function ChatPanel({ model, mockMode }: Props) {
-  const [messages, setMessages] = useState<ChatMessageT[]>([]);
+export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpdate }: Props) {
+  const [messages, setMessages] = useState<ChatMessageT[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lastPrompt, setLastPrompt] = useState<AssembledPrompt | null>(null);
@@ -25,11 +28,20 @@ export function ChatPanel({ model, mockMode }: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
+  function updateMessages(updater: (prev: ChatMessageT[]) => ChatMessageT[]) {
+    setMessages((prev) => {
+      const next = updater(prev);
+      onSessionUpdate?.(next);
+      return next;
+    });
+  }
+
   async function send() {
     const task = input.trim();
     if (!task || busy) return;
-    const prompt = assemblePrompt(task, messages);
-    setLastPrompt(prompt);
+
+    const mockPrompt = assemblePrompt(task, messages);
+    setLastPrompt(mockPrompt);
 
     const userMsg: ChatMessageT = {
       id: crypto.randomUUID(),
@@ -37,7 +49,7 @@ export function ChatPanel({ model, mockMode }: Props) {
       content: task,
       tokensIn: mockTokenCount(task),
       createdAt: Date.now(),
-      prompt,
+      prompt: mockPrompt,
     };
     const assistantId = crypto.randomUUID();
     const assistantMsg: ChatMessageT = {
@@ -47,26 +59,63 @@ export function ChatPanel({ model, mockMode }: Props) {
       tokensOut: 0,
       createdAt: Date.now(),
     };
-    setMessages((m) => [...m, userMsg, assistantMsg]);
+
+    updateMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput("");
     setBusy(true);
 
     let acc = "";
-    for await (const chunk of mockStream(prompt, model)) {
-      acc += chunk;
-      const out = mockTokenCount(acc);
-      setMessages((m) =>
-        m.map((msg) => (msg.id === assistantId ? { ...msg, content: acc, tokensOut: out } : msg)),
-      );
+    try {
+      if (mockMode) {
+        for await (const chunk of mockStream(mockPrompt, model)) {
+          acc += chunk;
+          setMessages((prev) =>
+            prev.map((m) => m.id === assistantId ? { ...m, content: acc, tokensOut: mockTokenCount(acc) } : m),
+          );
+        }
+        // Final save after mock stream completes
+        setMessages((prev) => {
+          const next = prev.map((m) => m.id === assistantId ? { ...m, content: acc } : m);
+          onSessionUpdate?.(next);
+          return next;
+        });
+      } else {
+        for await (const event of chatStream(task, messages, model)) {
+          if (event.type === "prompt") {
+            setLastPrompt(event.prompt as AssembledPrompt);
+          } else if (event.type === "delta") {
+            acc += event.text;
+            setMessages((prev) =>
+              prev.map((m) => m.id === assistantId ? { ...m, content: acc, tokensOut: mockTokenCount(acc) } : m),
+            );
+          } else if (event.type === "done") {
+            setMessages((prev) => {
+              const next = prev.map((m) =>
+                m.id === assistantId ? { ...m, tokensOut: event.tokensOut } : m,
+              );
+              onSessionUpdate?.(next);
+              return next;
+            });
+          } else if (event.type === "error") {
+            acc += `\n\n⚠️ ${event.message}`;
+            setMessages((prev) => {
+              const next = prev.map((m) => m.id === assistantId ? { ...m, content: acc } : m);
+              onSessionUpdate?.(next);
+              return next;
+            });
+          }
+        }
+      }
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
     <div className="flex flex-col h-full">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
         {messages.length === 0 ? (
-          <EmptyState mockMode={mockMode} model={model} />
+          <EmptyState mockMode={mockMode} model={model} onExample={setInput} />
         ) : (
           messages.map((m) => (
             <ChatMessage
@@ -116,13 +165,22 @@ export function ChatPanel({ model, mockMode }: Props) {
   );
 }
 
-function EmptyState({ mockMode, model }: { mockMode: boolean; model: string }) {
+function EmptyState({
+  mockMode,
+  model,
+  onExample,
+}: {
+  mockMode: boolean;
+  model: string;
+  onExample: (text: string) => void;
+}) {
   const examples = [
     "Summarize the five-part prompt framework",
     "Explain folder-driven context in two paragraphs",
-    "Draft a section for the README about retrieval",
+    "Draft a README section about retrieval",
     "List constraints from CLAUDE.md",
   ];
+
   return (
     <div className="max-w-2xl mx-auto py-12 animate-fade-in">
       <div className="flex items-center gap-3 mb-4">
@@ -135,17 +193,21 @@ function EmptyState({ mockMode, model }: { mockMode: boolean; model: string }) {
         </div>
       </div>
       <p className="text-muted-foreground mb-6 leading-relaxed">
-        Workspace loaded. Every prompt is auto-assembled from your CLAUDE.md (identity), CONTEXT.md
-        (project), and top-K retrieved snippets from <code className="mono text-foreground">/corpora</code>{" "}
-        with <span className="text-provenance">file:line provenance</span>. Running on{" "}
+        Workspace loaded. Every prompt is auto-assembled from your{" "}
+        <code className="mono text-foreground">CLAUDE.md</code> (identity),{" "}
+        <code className="mono text-foreground">CONTEXT.md</code> (project), and top-K retrieved snippets
+        from <code className="mono text-foreground">corpora/</code> with{" "}
+        <span className="text-provenance">file:line provenance</span>. Running on{" "}
         <code className="mono text-foreground">{model}</code>
-        {mockMode && <span className="ml-1 chip border-warn/40 bg-warn/10 text-warn">mock mode</span>}.
+        {mockMode && (
+          <span className="ml-1 chip border-warn/40 bg-warn/10 text-warn">mock mode</span>
+        )}.
       </p>
       <div className="grid sm:grid-cols-2 gap-2">
         {examples.map((ex) => (
           <button
             key={ex}
-            onClick={() => setExample(ex)}
+            onClick={() => onExample(ex)}
             className="text-left px-4 py-3 rounded-lg border border-border bg-card hover:border-primary/40 hover:shadow-soft transition-all text-sm group"
           >
             <span className="text-primary mono mr-2 group-hover:text-primary-glow transition-colors">›</span>
@@ -155,14 +217,4 @@ function EmptyState({ mockMode, model }: { mockMode: boolean; model: string }) {
       </div>
     </div>
   );
-
-  function setExample(text: string) {
-    const ta = document.querySelector<HTMLTextAreaElement>("textarea");
-    if (ta) {
-      ta.focus();
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-      setter?.call(ta, text);
-      ta.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-  }
 }

@@ -1,0 +1,3 @@
+[submodule "tools/browser-harness"]
+	path = tools/browser-harness
+	url = https://github.com/browser-use/browser-harness.git
