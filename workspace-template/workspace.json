@@ -1,0 +1,21 @@
+{
+  "name": "general",
+  "description": "General-purpose assistant workspace",
+  "model": "llama3.1:8b",
+  "port": 3000,
+  "tokenBudget": {
+    "maxTotal": 8192,
+    "reserveForResponse": 2048,
+    "contextTarget": 6144
+  },
+  "retrieval": {
+    "engine": "fts",
+    "topK": 5,
+    "includeProvenance": true,
+    "truncationStrategy": "summarize"
+  },
+  "ui": {
+    "showTokenStats": true,
+    "showProvenance": true
+  }
+}

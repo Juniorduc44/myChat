@@ -90,3 +90,20 @@ export type SelectedView =
   | { type: "file"; file: WorkspaceFile }
   | { type: "update" }
   | null;
+
+export interface WorkspaceInfo {
+  name: string;
+  path: string;
+  description: string;
+  model: string;
+}
+
+export interface WorkspaceListResponse {
+  workspaces: WorkspaceInfo[];
+  active: string;
+}
+
+export interface ArtifactFile {
+  filename: string;
+  content: string;
+}

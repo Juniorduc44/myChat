@@ -1,24 +1,27 @@
 import type { ChatSession, ChatMessage } from "./types";
 
-const KEY = "ollama-chat-sessions";
 const MAX_SESSIONS = 100;
 
-export function loadSessions(): ChatSession[] {
+function key(workspace: string) {
+  return `ollama-chat-sessions-${workspace}`;
+}
+
+export function loadSessions(workspace: string): ChatSession[] {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    return JSON.parse(localStorage.getItem(key(workspace)) ?? "[]");
   } catch {
     return [];
   }
 }
 
-export function saveSession(session: ChatSession): void {
-  const all = loadSessions().filter((s) => s.id !== session.id);
-  localStorage.setItem(KEY, JSON.stringify([session, ...all].slice(0, MAX_SESSIONS)));
+export function saveSession(session: ChatSession, workspace: string): void {
+  const all = loadSessions(workspace).filter((s) => s.id !== session.id);
+  localStorage.setItem(key(workspace), JSON.stringify([session, ...all].slice(0, MAX_SESSIONS)));
 }
 
-export function deleteSession(id: string): void {
-  const all = loadSessions().filter((s) => s.id !== id);
-  localStorage.setItem(KEY, JSON.stringify(all));
+export function deleteSession(id: string, workspace: string): void {
+  const all = loadSessions(workspace).filter((s) => s.id !== id);
+  localStorage.setItem(key(workspace), JSON.stringify(all));
 }
 
 export function newSession(model: string): ChatSession {

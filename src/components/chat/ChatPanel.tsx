@@ -5,18 +5,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChatMessage } from "./ChatMessage";
 import { TokenStats } from "./TokenStats";
 import { PromptInspector } from "./PromptInspector";
+import { parseFileBlocks } from "./ArtifactPanel";
 import { assemblePrompt, mockStream, mockTokenCount } from "@/lib/mockOllama";
 import { chatStream } from "@/lib/api";
-import type { ChatMessage as ChatMessageT, AssembledPrompt } from "@/lib/types";
+import type { ChatMessage as ChatMessageT, AssembledPrompt, ArtifactFile } from "@/lib/types";
 
 interface Props {
   model: string;
   mockMode: boolean;
   initialMessages?: ChatMessageT[];
   onSessionUpdate?: (messages: ChatMessageT[]) => void;
+  onFileBlocks?: (files: ArtifactFile[]) => void;
 }
 
-export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpdate }: Props) {
+export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpdate, onFileBlocks }: Props) {
   const [messages, setMessages] = useState<ChatMessageT[]>(initialMessages);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,6 +68,12 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
 
     let acc = "";
     try {
+      function emitFileBlocks(text: string) {
+        if (!onFileBlocks) return;
+        const blocks = parseFileBlocks(text);
+        if (blocks.length > 0) onFileBlocks(blocks);
+      }
+
       if (mockMode) {
         for await (const chunk of mockStream(mockPrompt, model)) {
           acc += chunk;
@@ -73,12 +81,12 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
             prev.map((m) => m.id === assistantId ? { ...m, content: acc, tokensOut: mockTokenCount(acc) } : m),
           );
         }
-        // Final save after mock stream completes
         setMessages((prev) => {
           const next = prev.map((m) => m.id === assistantId ? { ...m, content: acc } : m);
           onSessionUpdate?.(next);
           return next;
         });
+        emitFileBlocks(acc);
       } else {
         for await (const event of chatStream(task, messages, model)) {
           if (event.type === "prompt") {
@@ -96,6 +104,7 @@ export function ChatPanel({ model, mockMode, initialMessages = [], onSessionUpda
               onSessionUpdate?.(next);
               return next;
             });
+            emitFileBlocks(acc);
           } else if (event.type === "error") {
             acc += `\n\n⚠️ ${event.message}`;
             setMessages((prev) => {

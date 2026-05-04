@@ -38,6 +38,11 @@ const DEFAULT_CONSTRAINTS = [
 
 const DEFAULT_OUTPUT = "Markdown. Code in fenced blocks. Citations as [file:Lstart-end].";
 
+function readDefaultPrompt(workspaceDir) {
+  const p = path.join(workspaceDir, "templates", "default.prompt");
+  return existsSync(p) ? readFileSync(p, "utf8").trim() : DEFAULT_OUTPUT;
+}
+
 export function assemblePrompt({ workspaceDir, task, history = [], snippets = [], tokenBudget }) {
   const warnings = [];
   const identity = extractIdentity(readIfExists(path.join(workspaceDir, "CLAUDE.md")));
@@ -47,9 +52,10 @@ export function assemblePrompt({ workspaceDir, task, history = [], snippets = []
   const target = budget.contextTarget ?? budget.maxTotal - budget.reserveForResponse;
 
   // Snippets: keep adding until we'd blow the context budget, then summarize.
+  const outputFormat = readDefaultPrompt(workspaceDir);
   const headerCost =
     approxTokens(identity) + approxTokens(task) + approxTokens(contextDoc) +
-    approxTokens(DEFAULT_CONSTRAINTS.join(" ")) + approxTokens(DEFAULT_OUTPUT);
+    approxTokens(DEFAULT_CONSTRAINTS.join(" ")) + approxTokens(outputFormat);
   let used = headerCost + history.reduce((n, m) => n + approxTokens(m.content), 0);
   const kept = [];
   for (const s of snippets) {
@@ -81,7 +87,7 @@ export function assemblePrompt({ workspaceDir, task, history = [], snippets = []
     task: task || "",
     context: `${contextDoc}\n\n## Retrieved snippets\n${snippetBlock}`,
     constraints: DEFAULT_CONSTRAINTS,
-    outputFormat: DEFAULT_OUTPUT,
+    outputFormat,
   };
 
   const composed =

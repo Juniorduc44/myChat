@@ -13,7 +13,7 @@
 set -euo pipefail
 
 APP_DIR="${OLLAMA_CHAT_DIR:-$HOME/.local/share/ollama-chat}"
-WORKSPACE_DIR="${OLLAMA_CHAT_WORKSPACE:-$HOME/ollama-chat-workspace}"
+WORKSPACES_ROOT="$HOME/ollama-chat-workspaces"
 REPO_URL="${OLLAMA_CHAT_REPO:-https://github.com/YOUR_USER/ollama-chat}"
 NODE_MIN=18
 
@@ -81,28 +81,19 @@ step "Installing dependencies"
 step "Building SPA"
 (cd "$APP_DIR" && npm run build) && ok "dist/ ready"
 
-# ---------------------------------------------------------------- 5. Workspace
-step "Workspace at $WORKSPACE_DIR"
-if [ -d "$WORKSPACE_DIR" ]; then
-  skip "exists — leaving your files untouched"
-else
-  mkdir -p "$WORKSPACE_DIR"
-  cp -r "$APP_DIR/workspace/." "$WORKSPACE_DIR/"
-  ok "scaffolded default workspace"
-fi
+# ---------------------------------------------------------------- 5. Workspaces root
+step "Workspaces root at $WORKSPACES_ROOT"
+mkdir -p "$WORKSPACES_ROOT"
+# The server auto-scaffolds the "general" workspace on first boot via ensureDefaultWorkspace().
+ok "workspaces root ready (general workspace created on first run)"
 
-# ---------------------------------------------------------------- 6. Index
-step "Building retrieval index"
-(cd "$APP_DIR/server" && OLLAMA_CHAT_WORKSPACE="$WORKSPACE_DIR" npm run index) && ok "index built"
-
-# ---------------------------------------------------------------- 7. Launcher
+# ---------------------------------------------------------------- 6. Launcher
 step "Installing launcher"
 LAUNCHER="$HOME/.local/bin/ollama-chat"
 mkdir -p "$(dirname "$LAUNCHER")"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
-export OLLAMA_CHAT_WORKSPACE="$WORKSPACE_DIR"
-cd "$APP_DIR/server" && exec node index.js "\$@"
+exec node "$APP_DIR/server/index.js" "\$@"
 EOF
 chmod +x "$LAUNCHER"
 ok "launcher: $LAUNCHER"
@@ -130,9 +121,9 @@ fi
 # ---------------------------------------------------------------- 9. Launch
 c_green ""
 c_green "✓ Install complete."
-c_green "  App      : $APP_DIR"
-c_green "  Workspace: $WORKSPACE_DIR"
-c_green "  Launcher : $LAUNCHER"
+c_green "  App        : $APP_DIR"
+c_green "  Workspaces : $WORKSPACES_ROOT"
+c_green "  Launcher   : $LAUNCHER"
 c_green ""
 c_blue  "Starting Ollama Chat…"
 exec "$LAUNCHER"

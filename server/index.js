@@ -3,23 +3,38 @@
 // when ollama is missing so the app always works on first launch.
 //
 // Routes:
-//   GET  /api/status        — backend + ollama health, available models
-//   GET  /api/workspace     — list workspace files
-//   GET  /api/file?path=…   — read a workspace file
-//   POST /api/search        — FTS5 retrieval { q, k } -> snippets[]
-//   POST /api/chat          — { task, history, model } -> NDJSON stream
-//   GET  /                  — serves the built SPA (../dist)
+//   GET  /api/status                — backend + ollama health, available models
+//   GET  /api/workspaces            — list workspaces + active name
+//   POST /api/workspaces            — create a new workspace { name, description, model }
+//   PUT  /api/workspaces/active     — switch active workspace { name }
+//   GET  /api/workspace             — list files in active workspace
+//   GET  /api/file?path=…           — read a workspace file
+//   PUT  /api/file                  — save a workspace file
+//   POST /api/search                — FTS5 retrieval { q, k } -> snippets[]
+//   POST /api/chat                  — { task, history, model } -> NDJSON stream
+//   POST /api/models/pull           — stream pull progress
+//   DELETE /api/models/:model       — remove a model
+//   GET  /api/git-status            — branch, commit, submodule status
+//   POST /api/update                — stream git pull + npm installs
+//   GET  /                          — serves the built SPA (../dist)
 
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
 import { execa } from "execa";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import open from "open";
 
+import {
+  ensureDefaultWorkspace,
+  getActiveWorkspaceName,
+  setActiveWorkspaceName,
+  getActiveWorkspaceDir,
+  listWorkspaces,
+  scaffoldWorkspace,
+} from "./lib/workspaceManager.js";
 import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile } from "./lib/workspace.js";
 import { searchFTS } from "./lib/retrieval.js";
 import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
@@ -27,13 +42,10 @@ import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
 
-const WORKSPACE_DIR =
-  process.env.OLLAMA_CHAT_WORKSPACE ||
-  path.join(os.homedir(), "ollama-chat-workspace");
+// Ensure a default workspace exists before we need it
+ensureDefaultWorkspace();
 
-const config = loadWorkspace(WORKSPACE_DIR);
-const PORT = Number(process.env.PORT || config.port || 3000);
-const DEFAULT_MODEL = config.model || "llama3";
+const PORT = Number(process.env.PORT || 3000);
 
 const fastify = Fastify({ logger: { transport: { target: "pino-pretty" } } });
 await fastify.register(fastifyCors, { origin: true });
@@ -62,12 +74,10 @@ async function ollamaModels() {
 }
 
 async function detectGpu() {
-  // NVIDIA
   try {
     await execa("nvidia-smi", ["--query-gpu=name", "--format=csv,noheader"], { timeout: 1500 });
     return true;
   } catch { /* not found */ }
-  // AMD ROCm
   try {
     await execa("rocm-smi", ["--showproductname"], { timeout: 1500 });
     return true;
@@ -75,7 +85,6 @@ async function detectGpu() {
   return false;
 }
 
-// Streams ollama generation. Uses `ollama run --nowordwrap` and pipes stdout.
 function streamOllama(model, prompt, onChunk) {
   return new Promise((resolve, reject) => {
     const sub = execa("ollama", ["run", model, "--nowordwrap"], {
@@ -88,47 +97,102 @@ function streamOllama(model, prompt, onChunk) {
   });
 }
 
+// Helper: get active workspace config at request-time
+function activeConfig() {
+  const dir = getActiveWorkspaceDir();
+  return loadWorkspace(dir);
+}
+
 // --- Routes ---------------------------------------------------------------
 fastify.get("/api/status", async () => {
   const [installed, gpuAvailable] = await Promise.all([ollamaInstalled(), detectGpu()]);
   const models = installed ? await ollamaModels() : [];
+  const dir = getActiveWorkspaceDir();
+  const cfg = loadWorkspace(dir);
   return {
     reachable: true,
     ollamaInstalled: installed,
     models,
     gpuAvailable,
     port: PORT,
-    workspace: WORKSPACE_DIR,
-    defaultModel: DEFAULT_MODEL,
+    workspace: dir,
+    activeWorkspace: getActiveWorkspaceName(),
+    defaultModel: cfg.model || "llama3",
   };
 });
 
-fastify.get("/api/workspace", async () => listWorkspaceFiles(WORKSPACE_DIR));
+// --- Workspace management -------------------------------------------------
+fastify.get("/api/workspaces", async () => ({
+  workspaces: listWorkspaces(),
+  active: getActiveWorkspaceName(),
+}));
+
+fastify.post("/api/workspaces", async (req, reply) => {
+  const { name, description, model } = req.body ?? {};
+  if (!name?.trim()) return reply.code(400).send({ error: "name required" });
+  try {
+    const overrides = {};
+    if (description) overrides.description = description;
+    if (model) overrides.model = model;
+    const dir = scaffoldWorkspace(name.trim(), overrides);
+    return { ok: true, name: name.trim(), path: dir };
+  } catch (e) {
+    return reply.code(400).send({ error: e.message });
+  }
+});
+
+fastify.put("/api/workspaces/active", async (req, reply) => {
+  const { name } = req.body ?? {};
+  if (!name?.trim()) return reply.code(400).send({ error: "name required" });
+  const available = listWorkspaces().map((w) => w.name);
+  if (!available.includes(name.trim())) {
+    return reply.code(404).send({ error: `Workspace "${name}" not found` });
+  }
+  setActiveWorkspaceName(name.trim());
+  return { ok: true, active: name.trim() };
+});
+
+// --- Workspace file access ------------------------------------------------
+fastify.get("/api/workspace", async () => listWorkspaceFiles(getActiveWorkspaceDir()));
 
 fastify.get("/api/file", async (req, reply) => {
   const { path: p } = req.query;
   if (!p) return reply.code(400).send({ error: "path required" });
   try {
-    return { path: p, content: readWorkspaceFile(WORKSPACE_DIR, p) };
+    return { path: p, content: readWorkspaceFile(getActiveWorkspaceDir(), p) };
   } catch (e) {
     return reply.code(404).send({ error: e.message });
   }
 });
 
+fastify.put("/api/file", async (req, reply) => {
+  const { path: p, content } = req.body ?? {};
+  if (!p || content === undefined) return reply.code(400).send({ error: "path and content required" });
+  try {
+    writeWorkspaceFile(getActiveWorkspaceDir(), p, content);
+    return { ok: true };
+  } catch (e) {
+    return reply.code(400).send({ error: e.message });
+  }
+});
+
+// --- Search & chat --------------------------------------------------------
 fastify.post("/api/search", async (req) => {
   const { q, k = 5 } = req.body ?? {};
-  return { snippets: searchFTS(WORKSPACE_DIR, q ?? "", Number(k)) };
+  return { snippets: searchFTS(getActiveWorkspaceDir(), q ?? "", Number(k)) };
 });
 
 fastify.post("/api/chat", async (req, reply) => {
-  const { task, history = [], model = DEFAULT_MODEL } = req.body ?? {};
-  const snippets = task ? searchFTS(WORKSPACE_DIR, task, config.retrieval?.topK ?? 5) : [];
+  const dir = getActiveWorkspaceDir();
+  const cfg = activeConfig();
+  const { task, history = [], model = cfg.model || "llama3" } = req.body ?? {};
+  const snippets = task ? searchFTS(dir, task, cfg.retrieval?.topK ?? 5) : [];
   const prompt = assemblePrompt({
-    workspaceDir: WORKSPACE_DIR,
+    workspaceDir: dir,
     task,
     history,
     snippets,
-    tokenBudget: config.tokenBudget,
+    tokenBudget: cfg.tokenBudget,
   });
 
   reply.raw.setHeader("content-type", "application/x-ndjson");
@@ -158,19 +222,7 @@ fastify.post("/api/chat", async (req, reply) => {
   }
 });
 
-// PUT /api/file — save a workspace file
-fastify.put("/api/file", async (req, reply) => {
-  const { path: p, content } = req.body ?? {};
-  if (!p || content === undefined) return reply.code(400).send({ error: "path and content required" });
-  try {
-    writeWorkspaceFile(WORKSPACE_DIR, p, content);
-    return { ok: true };
-  } catch (e) {
-    return reply.code(400).send({ error: e.message });
-  }
-});
-
-// POST /api/models/pull — stream `ollama pull <model>` progress
+// --- Model management -----------------------------------------------------
 fastify.post("/api/models/pull", async (req, reply) => {
   const { model } = req.body ?? {};
   if (!model?.trim()) return reply.code(400).send({ error: "model required" });
@@ -193,7 +245,17 @@ fastify.post("/api/models/pull", async (req, reply) => {
   }
 });
 
-// GET /api/git-status — current branch, commit, submodule status
+fastify.delete("/api/models/:model", async (req, reply) => {
+  const { model } = req.params;
+  try {
+    await execa("ollama", ["rm", model], { timeout: 10000 });
+    return { ok: true };
+  } catch (e) {
+    return reply.code(500).send({ error: e.message });
+  }
+});
+
+// --- Git / update ---------------------------------------------------------
 fastify.get("/api/git-status", async () => {
   const git = (args) =>
     execa("git", args, { cwd: REPO_ROOT, timeout: 5000 })
@@ -209,8 +271,6 @@ fastify.get("/api/git-status", async () => {
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      // Format: [<status>]<sha1> <path> [(<description>)]
-      // Status char may be missing from the start after stdout.trim() on the first line.
       const m = line.match(/^([ +\-U]?)([0-9a-f]{40})\s+(\S+)(?:\s+\((.+)\))?/);
       if (!m) return { path: line.trim(), commit: "", status: "unknown", tag: "" };
       const statusMap = { " ": "clean", "": "clean", "+": "updated", "-": "missing", U: "conflict" };
@@ -219,7 +279,6 @@ fastify.get("/api/git-status", async () => {
   return { branch, commit, commitMsg, submodules };
 });
 
-// POST /api/update — stream git pull --recurse-submodules + npm installs
 fastify.post("/api/update", async (req, reply) => {
   reply.raw.setHeader("content-type", "application/x-ndjson");
   reply.raw.setHeader("cache-control", "no-cache");
@@ -254,17 +313,6 @@ fastify.post("/api/update", async (req, reply) => {
   }
 });
 
-// DELETE /api/models/:model — remove a local model
-fastify.delete("/api/models/:model", async (req, reply) => {
-  const { model } = req.params;
-  try {
-    await execa("ollama", ["rm", model], { timeout: 10000 });
-    return { ok: true };
-  } catch (e) {
-    return reply.code(500).send({ error: e.message });
-  }
-});
-
 // --- Static SPA -----------------------------------------------------------
 const distDir = path.resolve(__dirname, "..", "dist");
 if (existsSync(distDir)) {
@@ -294,7 +342,7 @@ async function bootWithPort(port, attempts = 0) {
 const finalPort = await bootWithPort(PORT);
 const url = `http://localhost:${finalPort}`;
 fastify.log.info(`Ollama Chat ready at ${url}`);
-fastify.log.info(`Workspace: ${WORKSPACE_DIR}`);
+fastify.log.info(`Active workspace: ${getActiveWorkspaceName()} → ${getActiveWorkspaceDir()}`);
 if (process.env.OPEN_BROWSER !== "0") {
   open(url).catch(() => {});
 }

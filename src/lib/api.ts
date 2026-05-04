@@ -1,5 +1,5 @@
 // Thin client. Tries the real Fastify backend first, falls back to mock.
-import type { BackendStatus, ChatMessage, WorkspaceFile } from "./types";
+import type { BackendStatus, ChatMessage, WorkspaceFile, WorkspaceListResponse } from "./types";
 
 const BASE = "/api";
 
@@ -69,6 +69,39 @@ export async function* pullModel(model: string): AsyncGenerator<PullEvent> {
 export async function deleteModel(model: string): Promise<void> {
   const r = await fetch(`${BASE}/models/${encodeURIComponent(model)}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`Delete failed: ${r.statusText}`);
+}
+
+export async function fetchWorkspaceList(): Promise<WorkspaceListResponse> {
+  const r = await fetch(`${BASE}/workspaces`, { signal: AbortSignal.timeout(2000) });
+  if (!r.ok) throw new Error(`workspaces fetch failed: ${r.status}`);
+  return r.json() as Promise<WorkspaceListResponse>;
+}
+
+export async function createWorkspace(
+  name: string,
+  opts: { description?: string; model?: string } = {},
+): Promise<void> {
+  const r = await fetch(`${BASE}/workspaces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, ...opts }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText })) as { error: string };
+    throw new Error(err.error ?? r.statusText);
+  }
+}
+
+export async function switchWorkspace(name: string): Promise<void> {
+  const r = await fetch(`${BASE}/workspaces/active`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText })) as { error: string };
+    throw new Error(err.error ?? r.statusText);
+  }
 }
 
 export async function fetchGitStatus(): Promise<import("./types").GitStatus> {

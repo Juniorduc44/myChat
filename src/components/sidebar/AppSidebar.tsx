@@ -9,10 +9,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
-import type { ChatSession, WorkspaceFile, WorkspaceFileKind, SelectedView } from "@/lib/types";
+import type { ChatSession, WorkspaceFile, WorkspaceFileKind, SelectedView, WorkspaceInfo } from "@/lib/types";
 import { groupSessionsByDate, deleteSession as deleteStoredSession } from "@/lib/sessions";
 import { fetchWorkspaceFiles } from "@/lib/api";
 import { listWorkspace } from "@/lib/mockOllama";
+import { WorkspaceSelector } from "./WorkspaceSelector";
 
 const KIND_ICON: Record<WorkspaceFileKind, typeof FileText> = {
   identity: Sparkles,
@@ -43,6 +44,11 @@ interface Props {
   activeTab: "chats" | "config";
   onTabChange: (tab: "chats" | "config") => void;
   wsFileVersion?: number;
+  // workspace props
+  workspaces: WorkspaceInfo[];
+  activeWorkspace: string;
+  onSwitchWorkspace: (name: string) => void;
+  onNewWorkspace: () => void;
 }
 
 export function AppSidebar({
@@ -57,6 +63,10 @@ export function AppSidebar({
   activeTab,
   onTabChange,
   wsFileVersion = 0,
+  workspaces,
+  activeWorkspace,
+  onSwitchWorkspace,
+  onNewWorkspace,
 }: Props) {
   const [wsFiles, setWsFiles] = useState<WorkspaceFile[]>([]);
 
@@ -77,6 +87,12 @@ export function AppSidebar({
 
   return (
     <aside className="w-72 shrink-0 border-r border-border bg-card/40 backdrop-blur-sm flex flex-col h-full">
+      <WorkspaceSelector
+        workspaces={workspaces}
+        active={activeWorkspace}
+        onSwitch={onSwitchWorkspace}
+        onNewWorkspace={onNewWorkspace}
+      />
       <Tabs
         value={activeTab}
         onValueChange={(v) => onTabChange(v as "chats" | "config")}
@@ -134,7 +150,7 @@ export function AppSidebar({
                           isActive={false}
                           onSelect={() => onSelectSession(s)}
                           onDelete={() => {
-                            deleteStoredSession(s.id);
+                            deleteStoredSession(s.id, activeWorkspace);
                             onDeleteSession(s.id);
                           }}
                         />
