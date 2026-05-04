@@ -1,16 +1,28 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from "react";
+import { TopBar } from "@/components/chat/TopBar";
+import { WorkspaceSidebar } from "@/components/chat/WorkspaceSidebar";
+import { ChatPanel } from "@/components/chat/ChatPanel";
+import type { BackendStatus } from "@/lib/types";
 
-// IMPORTANT: Fully REPLACE this with your own code
-const PlaceholderIndex = () => {
-  // PLACEHOLDER: Replace this entire return statement with the user's app.
-  // The inline background color is intentionally not part of the design system.
+const Index = () => {
+  const [model, setModel] = useState("llama3 (mock)");
+  const [status, setStatus] = useState<BackendStatus>({
+    reachable: false,
+    ollamaInstalled: false,
+    models: [],
+  });
+
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: '#fcfbf8' }}>
-      <img data-lovable-blank-page-placeholder="REMOVE_THIS" src="/placeholder.svg" alt="Your app will live here!" />
+    <div className="h-screen flex flex-col bg-background">
+      <TopBar model={model} setModel={setModel} onStatus={setStatus} />
+      <div className="flex-1 flex min-h-0">
+        <WorkspaceSidebar />
+        <main className="flex-1 min-w-0 flex flex-col bg-gradient-paper">
+          <ChatPanel model={model} mockMode={!status.reachable} />
+        </main>
+      </div>
     </div>
   );
 };
-
-const Index = PlaceholderIndex;
 
 export default Index;
