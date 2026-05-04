@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   MessageSquare, Settings2, Plus, Trash2, FolderTree,
   Sparkles, BookMarked, Library, FileText, Box, FileJson,
-  ChevronRight, Zap, ArrowUpCircle, GitBranch,
+  ChevronRight, Zap, ArrowUpCircle, GitBranch, Archive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -84,6 +84,7 @@ export function AppSidebar({
   const selectedFilePath =
     selectedView?.type === "file" ? selectedView.file.path : null;
   const updateSelected = selectedView?.type === "update";
+  const backupSelected = selectedView?.type === "backup";
 
   return (
     <aside className="w-72 shrink-0 border-r border-border bg-card/40 backdrop-blur-sm flex flex-col h-full">
@@ -92,6 +93,7 @@ export function AppSidebar({
         active={activeWorkspace}
         onSwitch={onSwitchWorkspace}
         onNewWorkspace={onNewWorkspace}
+        onOpenBackup={() => onSelectView({ type: "backup" })}
       />
       <Tabs
         value={activeTab}
@@ -251,6 +253,22 @@ export function AppSidebar({
                 <span className="flex-1 text-xs">Update System</span>
                 <GitBranch className="w-3 h-3 text-muted-foreground shrink-0" />
                 {updateSelected && <ChevronRight className="w-3 h-3 shrink-0 text-primary" />}
+              </button>
+              <button
+                onClick={() => onSelectView({ type: "backup" })}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left group transition-colors ${
+                  backupSelected
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "hover:bg-muted text-foreground"
+                }`}
+              >
+                <Archive
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    backupSelected ? "text-primary" : "text-muted-foreground group-hover:text-primary"
+                  }`}
+                />
+                <span className="flex-1 text-xs">Backup &amp; Restore</span>
+                {backupSelected && <ChevronRight className="w-3 h-3 shrink-0 text-primary" />}
               </button>
             </div>
             <Separator />

@@ -89,6 +89,7 @@ export interface GitStatus {
 export type SelectedView =
   | { type: "file"; file: WorkspaceFile }
   | { type: "update" }
+  | { type: "backup" }
   | null;
 
 export interface WorkspaceInfo {

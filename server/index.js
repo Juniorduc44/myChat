@@ -38,6 +38,7 @@ import {
 import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile } from "./lib/workspace.js";
 import { searchFTS } from "./lib/retrieval.js";
 import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
+import { streamWorkspaceZip, restoreWorkspaceZip } from "./lib/backup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -49,6 +50,9 @@ const PORT = Number(process.env.PORT || 3000);
 
 const fastify = Fastify({ logger: { transport: { target: "pino-pretty" } } });
 await fastify.register(fastifyCors, { origin: true });
+await fastify.register((await import("@fastify/multipart")).default, {
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB max zip upload
+});
 
 // --- Ollama helpers --------------------------------------------------------
 async function ollamaInstalled() {
@@ -150,6 +154,35 @@ fastify.put("/api/workspaces/active", async (req, reply) => {
   }
   setActiveWorkspaceName(name.trim());
   return { ok: true, active: name.trim() };
+});
+
+// --- Workspace backup & restore -------------------------------------------
+// GET /api/workspaces/backup?name=foo  — download foo.zip
+// GET /api/workspaces/backup           — download all-workspaces.zip
+fastify.get("/api/workspaces/backup", async (req, reply) => {
+  const { name } = req.query;
+  try {
+    await streamWorkspaceZip(reply, name || null);
+  } catch (e) {
+    if (!reply.raw.headersSent) reply.code(404).send({ error: e.message });
+  }
+});
+
+// POST /api/workspaces/restore — upload a backup zip (multipart field "file")
+fastify.post("/api/workspaces/restore", async (req, reply) => {
+  let data;
+  try {
+    data = await req.file();
+  } catch {
+    return reply.code(400).send({ error: "Expected multipart file upload" });
+  }
+  if (!data) return reply.code(400).send({ error: "No file provided" });
+  try {
+    const restored = await restoreWorkspaceZip(data.file);
+    return { ok: true, restored };
+  } catch (e) {
+    return reply.code(500).send({ error: e.message });
+  }
 });
 
 // --- Workspace file access ------------------------------------------------

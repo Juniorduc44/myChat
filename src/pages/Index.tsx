@@ -7,6 +7,7 @@ import { ArtifactPanel } from "@/components/chat/ArtifactPanel";
 import { ConfigDetailPanel } from "@/components/config/ConfigDetailPanel";
 import { NewWorkspacePanel } from "@/components/config/NewWorkspacePanel";
 import { UpdatePanel } from "@/components/config/UpdatePanel";
+import { BackupPanel } from "@/components/config/BackupPanel";
 import {
   fetchWorkspaceFiles,
   fetchWorkspaceList,
@@ -162,8 +163,9 @@ const Index = () => {
 
   const showUpdate = selectedView?.type === "update";
   const showFile = selectedView?.type === "file";
+  const showBackup = selectedView?.type === "backup";
   const showNewWs = showNewWorkspace;
-  const showChat = !showUpdate && !showFile && !showNewWs;
+  const showChat = !showUpdate && !showFile && !showNewWs && !showBackup;
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -203,6 +205,16 @@ const Index = () => {
 
         <main className="flex-1 min-w-0 flex flex-col bg-gradient-paper overflow-hidden">
           {showUpdate && <UpdatePanel mockMode={mockMode} />}
+          {showBackup && (
+            <BackupPanel
+              workspaces={workspaces}
+              onRestored={() => {
+                fetchWorkspaceList()
+                  .then(({ workspaces: ws }) => setWorkspaces(ws))
+                  .catch(() => {});
+              }}
+            />
+          )}
           {showFile && (
             <ConfigDetailPanel
               key={selectedView.file.path}

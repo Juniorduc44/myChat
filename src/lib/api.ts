@@ -104,6 +104,28 @@ export async function switchWorkspace(name: string): Promise<void> {
   }
 }
 
+// Download a workspace zip. name=undefined means all workspaces.
+export function downloadWorkspaceBackup(name?: string): void {
+  const url = name
+    ? `${BASE}/workspaces/backup?name=${encodeURIComponent(name)}`
+    : `${BASE}/workspaces/backup`;
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name ? `ollama-chat-${name}.zip` : "ollama-chat-all-workspaces.zip";
+  a.click();
+}
+
+export async function restoreWorkspaceBackup(file: File): Promise<{ restored: string[] }> {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`${BASE}/workspaces/restore`, { method: "POST", body: form });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText })) as { error: string };
+    throw new Error(err.error ?? r.statusText);
+  }
+  return r.json() as Promise<{ restored: string[] }>;
+}
+
 export async function fetchGitStatus(): Promise<import("./types").GitStatus> {
   const r = await fetch(`${BASE}/git-status`, { signal: AbortSignal.timeout(5000) });
   if (!r.ok) throw new Error(`git-status failed: ${r.status}`);
