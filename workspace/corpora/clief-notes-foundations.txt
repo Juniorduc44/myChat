@@ -1,0 +1,79 @@
+SOURCE: Clief Notes — The Foundation, Lessons 1.2 and 1.3
+URL: https://www.skool.com/quantum-quill-lyceum-1116/classroom
+INDEXED: 2026-05-03
+
+---
+
+LESSON 1.2: YOUR FIRST FOLDER
+
+The folder fixes the blank-slate problem. Without it, every conversation begins from zero — the user re-explains who they are, what the project is, and what they need. The folder carries that context permanently.
+
+Three files are the minimum:
+
+CLAUDE.md — tells the assistant who it is working for and how to behave. Identity and rules.
+CONTEXT.md — tells the assistant what the project is right now. Current work, what good looks like, what to avoid.
+REFERENCES.md — background material. Examples, links, notes. Things the assistant should know but not act on directly.
+
+The files carry context so the user does not have to re-explain it every time. Edit them when the project changes. Add more files when more knowledge is needed. Create separate folders for separate projects.
+
+Key principle: the folder is memory. The prompt is direction. They work together.
+
+How to point Claude at the folder:
+- Claude Code (terminal): navigate to the folder, run `claude`. It reads the files automatically.
+- Claude in browser (Projects): upload the three files as Project Knowledge and start a conversation inside that Project.
+- Claude in browser (fallback): copy the contents of all three files and paste them at the top of the first message.
+
+---
+
+LESSON 1.3: HOW TO STRUCTURE ANY PROMPT
+
+A prompt is an instruction set. The clearer the instruction, the better the result.
+
+Five parts. Not all five are needed every time. Knowing them means always knowing which one is missing when output is wrong.
+
+PART 1 — IDENTITY
+Tell the assistant what role to fill. Shapes vocabulary, depth, and assumptions.
+Examples: "You are a senior copywriter who writes for B2B SaaS companies." / "You are a Python developer who writes clean, well-documented code."
+Note: identity is the part most people skip. Output is always more generic without it.
+If CLAUDE.md is set up, identity is already handled for ongoing sessions. Add it inline only for one-off role shifts.
+
+PART 2 — TASK
+Be specific. Good tasks have three things:
+- A clear action: write, review, analyze, compare, build, fix, summarize
+- A defined scope: how long, how many, what format, what section
+- Enough detail that someone unfamiliar could attempt it
+Test: if a stranger could not start working on it without asking five follow-up questions, the task is too vague.
+
+PART 3 — CONTEXT
+Background. Constraints. Audience. Prior decisions. Relevant data. Anything needed to do the task well that the model would not know on its own.
+CONTEXT.md handles project-level context. Per-prompt context goes inline.
+If output feels generic or off-target, the fix is almost always more context, not a better prompt.
+
+PART 4 — CONSTRAINTS
+What the model should NOT do. Telling the model what to avoid is just as useful as telling it what to do.
+Examples: "Do not use jargon." / "Keep under 300 words." / "No bullet points, write in paragraphs." / "Do not start with 'In today's world'."
+Every constraint stated is a mistake not made. Every annoyance in past outputs is a constraint that was not set.
+
+PART 5 — OUTPUT FORMAT
+The shape of the result. A list? A table? Three options? A code block with comments? A draft with placeholders?
+Output format is the difference between something usable immediately and something that needs 20 minutes of reformatting.
+
+WHEN TO USE WHICH PARTS:
+- Simple and quick: Task only
+- Creative: Identity + Task + Constraints + Output Format
+- Complex: All five
+- Ongoing project: Identity and Context in files. Task and Constraints in each prompt.
+
+CHUNKING — BREAKING BIG PROJECTS INTO PROMPTS:
+Rule: each prompt should ask for one clear thing.
+Wrong: "Write me a full marketing strategy with a content calendar, email sequences, and social posts."
+Right: (1) outline themes → (2) review → (3) draft calendar for theme 1 → (4) review → (5) write first email.
+Each step builds on the last. If something goes wrong at step 3, only step 3 needs to be redone.
+
+CHUNKING LARGE DATA INPUTS:
+Step 1: Give the structure first. "I am going to give you a 40-page report in sections. Here is the table of contents."
+Step 2: Feed sections in order. After each: "Here is Section 3. What are the key claims?"
+Step 3: After the last section: "Now summarize the three strongest arguments and the two weakest."
+Note: keep data in its native format (tables, JSON). Do not convert to prose before passing to the model.
+
+The folder is memory. The prompt is direction. They work together.
