@@ -1,0 +1,29 @@
+{
+  "name": "ollama-chat",
+  "model": "llama3",
+  "port": 3000,
+  "tokenBudget": {
+    "maxTotal": 8192,
+    "reserveForResponse": 2048,
+    "contextTarget": 6144
+  },
+  "retrieval": {
+    "engine": "fts",
+    "topK": 5,
+    "includeProvenance": true,
+    "truncationStrategy": "summarize"
+  },
+  "workspace": {
+    "identity": "CLAUDE.md",
+    "context": "CONTEXT.md",
+    "references": "REFERENCES.md",
+    "snippets": "snippets/",
+    "corpora": "corpora/",
+    "templates": "templates/"
+  },
+  "ui": {
+    "showTokenStats": true,
+    "showProvenance": true,
+    "autoOpenBrowser": true
+  }
+}

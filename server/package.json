@@ -1,0 +1,22 @@
+{
+  "name": "ollama-chat-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first Fastify backend for Ollama Chat — shells to ollama CLI, serves SPA, runs SQLite FTS retrieval.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "index": "node indexer.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/cors": "^9.0.1",
+    "better-sqlite3": "^11.3.0",
+    "execa": "^9.4.0",
+    "open": "^10.1.0"
+  }
+}

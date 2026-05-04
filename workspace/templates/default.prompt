@@ -1,0 +1,37 @@
+# Default Prompt Template
+# Five-part structure. Remove any section not needed for this task type.
+# Reference: CLAUDE.md → Prompt assembly rules
+
+## [IDENTITY]
+# Loaded automatically from CLAUDE.md.
+# Override here only if the assistant needs to shift roles for this task.
+# Example: "You are a senior Node.js developer reviewing a pull request."
+
+## [TASK]
+# One clear thing. Action verb + scope.
+# Test: could a stranger attempt this without asking five follow-up questions?
+# Example: "Write a 200-word description of the retrieval layer for the README."
+
+
+## [CONTEXT]
+# Project-level context loaded automatically from CONTEXT.md.
+# Add per-task context below — relevant data, prior decisions, audience.
+# Retrieved snippets from corpora are appended here automatically with file:line provenance.
+
+
+## [CONSTRAINTS]
+# What to avoid. Every line here is a mistake the model will not make.
+# Example:
+# - Do not use jargon without explaining it.
+# - Do not suggest solutions that require a paid API.
+# - Keep response under 300 words.
+# - Do not use bullet points — write in paragraphs.
+
+
+## [OUTPUT FORMAT]
+# The shape of the result.
+# Example:
+# - Return a markdown table with columns: File, Purpose, Notes.
+# - Write three options, each under 50 words, followed by a one-sentence tradeoff summary.
+# - Return a code block with inline comments. No prose outside the block.
+
