@@ -22,7 +22,7 @@ import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCors from "@fastify/cors";
 import { execa } from "execa";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
@@ -32,6 +32,7 @@ import {
   getActiveWorkspaceName,
   setActiveWorkspaceName,
   getActiveWorkspaceDir,
+  getWorkspaceDir,
   listWorkspaces,
   scaffoldWorkspace,
 } from "./lib/workspaceManager.js";
@@ -39,10 +40,11 @@ import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFil
 import { searchFTS } from "./lib/retrieval.js";
 import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
 import { streamWorkspaceZip, restoreWorkspaceZip } from "./lib/backup.js";
-import { buildWsBuilderPrompt } from "./lib/ws-builder.js";
+import { buildWsBuilderPrompt, buildWsBuilderMessages, WS_BUILDER_TOOLS } from "./lib/ws-builder.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
+const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 
 // Ensure a default workspace exists before we need it
 ensureDefaultWorkspace();
@@ -100,6 +102,102 @@ function streamOllama(model, prompt, onChunk) {
     sub.on("error", reject);
     sub.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ollama exited ${code}`))));
   });
+}
+
+// Check whether a model advertises the "tools" capability via Ollama REST API.
+async function checkModelSupportsTools(model) {
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/show`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: model }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return false;
+    const data = await r.json();
+    return Array.isArray(data.capabilities) && data.capabilities.includes("tools");
+  } catch {
+    return false;
+  }
+}
+
+// Single non-streaming Ollama chat request (for tool-calling agentic loop).
+async function ollamaChatNoStream(model, messages, tools) {
+  const r = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, messages, tools, stream: false }),
+    signal: AbortSignal.timeout(180_000),
+  });
+  if (!r.ok) throw new Error(`Ollama /api/chat error: ${r.status}`);
+  return r.json();
+}
+
+// Agentic loop: runs the workspace-builder with tool calls and writes files to disk.
+async function runWsBuilderWithTools(workspaceName, wsDir, model, messages, reply) {
+  const write = (obj) => reply.raw.write(JSON.stringify(obj) + "\n");
+  let wsCreated = false;
+  const loopMessages = [...messages];
+
+  for (let i = 0; i < 30; i++) {
+    let res;
+    try {
+      res = await ollamaChatNoStream(model, loopMessages, WS_BUILDER_TOOLS);
+    } catch (e) {
+      write({ type: "error", message: e.message });
+      return;
+    }
+
+    const msg = res.message;
+    loopMessages.push(msg);
+
+    // No tool calls — final text response
+    if (!msg.tool_calls?.length) {
+      if (msg.content) write({ type: "delta", text: msg.content });
+      write({ type: "done", tokensOut: res.eval_count ?? 0 });
+      return;
+    }
+
+    // Execute each tool call
+    for (const tc of msg.tool_calls) {
+      const { name, arguments: args } = tc.function;
+
+      if (name === "write_workspace_file") {
+        const { filename, content } = args;
+
+        // Lazily scaffold workspace on first write
+        if (!wsCreated) {
+          try {
+            scaffoldWorkspace(workspaceName, {});
+          } catch {
+            // Already exists — fine, we'll overwrite files
+          }
+          wsCreated = true;
+          write({ type: "workspace_created", name: workspaceName });
+        }
+
+        write({ type: "tool_call", tool: "write_workspace_file", filename });
+
+        try {
+          const fullPath = path.join(wsDir, filename);
+          mkdirSync(path.dirname(fullPath), { recursive: true });
+          writeFileSync(fullPath, content, "utf8");
+          write({ type: "tool_done", tool: "write_workspace_file", filename });
+          loopMessages.push({ role: "tool", content: JSON.stringify({ ok: true, path: filename }) });
+        } catch (e) {
+          write({ type: "error", message: `Failed to write ${filename}: ${e.message}` });
+          loopMessages.push({ role: "tool", content: JSON.stringify({ ok: false, error: e.message }) });
+        }
+      } else if (name === "finish_workspace") {
+        const { summary } = args;
+        write({ type: "workspace_saved", name: workspaceName, summary });
+        write({ type: "done", tokensOut: res.eval_count ?? 0 });
+        return;
+      }
+    }
+  }
+
+  write({ type: "error", message: "Tool loop reached max iterations without finishing." });
 }
 
 // Helper: get active workspace config at request-time
@@ -210,14 +308,27 @@ fastify.put("/api/file", async (req, reply) => {
   }
 });
 
+// --- Model capabilities ---------------------------------------------------
+// GET /api/models/capabilities?model=llama3.1:8b
+fastify.get("/api/models/capabilities", async (req, reply) => {
+  const { model } = req.query;
+  if (!model?.trim()) return reply.code(400).send({ error: "model required" });
+  const installed = await ollamaInstalled();
+  if (!installed) return { tools: false, reason: "ollama_not_installed" };
+  const tools = await checkModelSupportsTools(model.trim());
+  return { tools, model: model.trim() };
+});
+
 // --- Workspace builder (AI-assisted workspace creation) -------------------
-// POST /api/ws-builder — uses hardcoded 1.3 system prompt, ignores active workspace.
-// Body: { task, history: [{role,content}], model, mode: "auto"|"manual" }
+// POST /api/ws-builder
+// Body: { task, history: [{role,content}], model, mode: "auto"|"manual", workspaceName? }
+//
+// If model supports tools AND workspaceName is provided → agentic loop writes files to disk.
+// Otherwise → stream text with file blocks for manual copy/save.
 fastify.post("/api/ws-builder", async (req, reply) => {
-  const { task = "", history = [], model, mode = "auto" } = req.body ?? {};
+  const { task = "", history = [], model, mode = "auto", workspaceName } = req.body ?? {};
   const cfg = activeConfig();
   const selectedModel = model || cfg.model || "llama3.1:8b";
-  const composed = buildWsBuilderPrompt(task, history, mode);
 
   reply.raw.setHeader("content-type", "application/x-ndjson");
   reply.raw.setHeader("cache-control", "no-cache");
@@ -231,6 +342,24 @@ fastify.post("/api/ws-builder", async (req, reply) => {
     return;
   }
 
+  // Tool-calling path: model supports tools + workspace name provided
+  const supportsTools = workspaceName ? await checkModelSupportsTools(selectedModel) : false;
+
+  if (supportsTools && workspaceName) {
+    const wsDir = getWorkspaceDir(workspaceName);
+    const messages = buildWsBuilderMessages(task, history, mode, workspaceName);
+    try {
+      await runWsBuilderWithTools(workspaceName, wsDir, selectedModel, messages, reply);
+    } catch (e) {
+      reply.raw.write(JSON.stringify({ type: "error", message: e.message }) + "\n");
+    } finally {
+      reply.raw.end();
+    }
+    return;
+  }
+
+  // Streaming text path (non-tool models or no workspace name yet)
+  const composed = buildWsBuilderPrompt(task, history, mode);
   try {
     let acc = "";
     await streamOllama(selectedModel, composed, (chunk) => {

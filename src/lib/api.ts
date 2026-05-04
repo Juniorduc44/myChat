@@ -71,16 +71,30 @@ export async function deleteModel(model: string): Promise<void> {
   if (!r.ok) throw new Error(`Delete failed: ${r.statusText}`);
 }
 
+export async function checkModelToolsSupport(model: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${BASE}/models/capabilities?model=${encodeURIComponent(model)}`, {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!r.ok) return false;
+    const data = await r.json() as { tools: boolean };
+    return data.tools === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function* wsBuilderStream(
   task: string,
   history: { role: string; content: string }[],
   model: string,
   mode: "auto" | "manual" = "auto",
+  workspaceName?: string,
 ): AsyncGenerator<NdjsonEvent> {
   const r = await fetch(`${BASE}/ws-builder`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ task, history, model, mode }),
+    body: JSON.stringify({ task, history, model, mode, workspaceName }),
   });
   if (!r.ok || !r.body) throw new Error(`/api/ws-builder returned ${r.status}`);
   const reader = r.body.getReader();
@@ -187,7 +201,11 @@ export type NdjsonEvent =
   | { type: "prompt"; prompt: unknown }
   | { type: "delta"; text: string }
   | { type: "done"; tokensOut: number }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "workspace_created"; name: string }
+  | { type: "tool_call"; tool: string; filename: string }
+  | { type: "tool_done"; tool: string; filename: string }
+  | { type: "workspace_saved"; name: string; summary: string };
 
 export async function* chatStream(
   task: string,

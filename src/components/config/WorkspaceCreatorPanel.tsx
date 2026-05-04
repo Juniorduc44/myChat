@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Zap, ListChecks, ChevronLeft, Send, Loader2, Save,
-  Check, AlertCircle, FileText, Bot,
+  Check, AlertCircle, FileText, Bot, WrenchIcon, CircleAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { wsBuilderStream, createWorkspace, switchWorkspace, saveFileContent } from "@/lib/api";
+import { wsBuilderStream, createWorkspace, switchWorkspace, saveFileContent, checkModelToolsSupport } from "@/lib/api";
 import { parseFileBlocks } from "@/components/chat/ArtifactPanel";
 import type { ArtifactFile } from "@/lib/types";
 
 type Mode = "select" | "auto" | "manual";
 interface Msg { role: "user" | "assistant"; content: string; }
+interface ToolProgress { filename: string; done: boolean; }
 
 interface Props {
   models: string[];
@@ -33,43 +34,92 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Tool support state
+  const [toolsSupported, setToolsSupported] = useState<boolean | null>(null); // null = checking
+  const [toolProgress, setToolProgress] = useState<ToolProgress[]>([]);
+  const [toolSummary, setToolSummary] = useState("");
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const liveModel = models.find((m) => !m.includes("(mock)")) ?? "llama3.1:8b";
+  const liveModel = models.find((m) => !m.includes("(mock)")) ?? "";
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, liveText]);
+  }, [messages, liveText, toolProgress]);
 
-  // Kick off manual mode with AI's welcome + first question
+  // Check tool support when a real model is available
+  useEffect(() => {
+    if (!liveModel) { setToolsSupported(false); return; }
+    setToolsSupported(null);
+    checkModelToolsSupport(liveModel).then(setToolsSupported);
+  }, [liveModel]);
+
+  // Kick off manual mode welcome + first question
   useEffect(() => {
     if (mode === "manual" && messages.length === 0) {
-      runBuilder("", [], "manual");
+      // For tool mode, need workspace name first — don't auto-kickoff until name is set
+      if (toolsSupported === false || (toolsSupported && wsName)) {
+        runBuilder("", [], "manual");
+      }
     }
-  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, toolsSupported]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function runBuilder(task: string, history: Msg[], builderMode: "auto" | "manual") {
     setStreaming(true);
     setLiveText("");
+    setToolProgress([]);
     let acc = "";
+    let autoSaved = false;
+
     try {
-      for await (const ev of wsBuilderStream(task, history, liveModel, builderMode)) {
-        if (ev.type === "delta") { acc += ev.text; setLiveText(acc); }
-        else if (ev.type === "done" || ev.type === "error") break;
+      const nameToUse = toolsSupported ? wsName : undefined;
+      for await (const ev of wsBuilderStream(task, history, liveModel, builderMode, nameToUse)) {
+        if (ev.type === "delta") {
+          acc += ev.text;
+          setLiveText(acc);
+        } else if (ev.type === "workspace_created") {
+          // Workspace dir was created on server — update our local name state
+          setWsName(ev.name);
+        } else if (ev.type === "tool_call") {
+          setToolProgress((prev) => [...prev, { filename: ev.filename, done: false }]);
+        } else if (ev.type === "tool_done") {
+          setToolProgress((prev) =>
+            prev.map((p) => p.filename === ev.filename ? { ...p, done: true } : p),
+          );
+        } else if (ev.type === "workspace_saved") {
+          setToolSummary(ev.summary);
+          autoSaved = true;
+        } else if (ev.type === "done" || ev.type === "error") {
+          break;
+        }
       }
     } finally {
       setStreaming(false);
       setLiveText("");
-      const reply: Msg = { role: "assistant", content: acc };
-      setMessages((prev) => [...prev, reply]);
 
-      const blocks = parseFileBlocks(acc);
-      if (blocks.length > 0) {
-        setFiles(blocks);
-        setActiveFile(blocks[0].filename);
-        const cfg = blocks.find((b) => b.filename === "workspace.json");
-        if (cfg) {
-          try { const j = JSON.parse(cfg.content); if (j.name) setWsName(j.name); } catch { /* ignore */ }
+      if (autoSaved) {
+        // Tool mode: files written to disk — switch and navigate
+        setSaved(true);
+        try {
+          await switchWorkspace(wsName);
+        } catch { /* already active or just created */ }
+        setTimeout(() => onCreated(wsName), 800);
+        return;
+      }
+
+      if (acc) {
+        const reply: Msg = { role: "assistant", content: acc };
+        setMessages((prev) => [...prev, reply]);
+
+        const blocks = parseFileBlocks(acc);
+        if (blocks.length > 0) {
+          setFiles(blocks);
+          setActiveFile(blocks[0].filename);
+          const cfg = blocks.find((b) => b.filename === "workspace.json");
+          if (cfg) {
+            try { const j = JSON.parse(cfg.content); if (j.name) setWsName(j.name); } catch { /* ignore */ }
+          }
         }
       }
     }
@@ -77,9 +127,13 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
 
   async function handleGenerate() {
     if (!autoPrompt.trim() || streaming) return;
+    if (toolsSupported && !wsName.trim()) return; // name required in tool mode
     const userMsg: Msg = { role: "user", content: autoPrompt.trim() };
     setMessages([userMsg]);
     setFiles([]);
+    setToolProgress([]);
+    setToolSummary("");
+    setSaved(false);
     await runBuilder(autoPrompt.trim(), [], "auto");
   }
 
@@ -109,6 +163,12 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
     }
   }
 
+  function startManualWithName() {
+    if (!wsName.trim()) return;
+    setMessages([]);
+    runBuilder("", [], "manual");
+  }
+
   function reset() {
     setMode("select");
     setMessages([]);
@@ -119,6 +179,8 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
     setWsName("");
     setSaved(false);
     setSaveError("");
+    setToolProgress([]);
+    setToolSummary("");
   }
 
   // ── MODE SELECTOR ──────────────────────────────────────────────────────
@@ -187,6 +249,9 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
   }
 
   // ── SHARED CREATOR VIEW (AUTO + MANUAL) ────────────────────────────────
+  const isToolMode = toolsSupported === true;
+  const toolsChecking = toolsSupported === null;
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header */}
@@ -198,14 +263,58 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
           {mode === "auto" ? "Auto-Gen Workspace" : "Guided Workspace Setup"}
         </h2>
         <span className="chip border-primary/30 bg-primary/10 text-primary text-[10px]">AI</span>
+
+        {/* Tool support badge */}
+        {toolsChecking && (
+          <span className="ml-auto chip border-border bg-muted text-muted-foreground text-[10px] flex items-center gap-1">
+            <Loader2 className="w-2.5 h-2.5 animate-spin" /> checking model…
+          </span>
+        )}
+        {isToolMode && !toolsChecking && (
+          <span className="ml-auto chip border-primary/30 bg-primary/10 text-primary text-[10px] flex items-center gap-1">
+            <WrenchIcon className="w-2.5 h-2.5" /> tool mode — files auto-saved
+          </span>
+        )}
+        {toolsSupported === false && !toolsChecking && liveModel && (
+          <span className="ml-auto chip border-warn/40 bg-warn/10 text-warn text-[10px] flex items-center gap-1">
+            <CircleAlert className="w-2.5 h-2.5" /> copy/paste mode
+          </span>
+        )}
       </div>
 
-      {/* Auto-gen input — only before first generate */}
-      {mode === "auto" && messages.length === 0 && (
+      {/* Non-tool-mode warning banner */}
+      {toolsSupported === false && !toolsChecking && liveModel && (
+        <div className="shrink-0 px-5 py-2.5 border-b border-warn/20 bg-warn/5 flex items-start gap-2">
+          <CircleAlert className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5" />
+          <p className="text-[11px] text-warn leading-relaxed">
+            <strong>{liveModel}</strong> does not support tool calling. The AI will display the generated files as text — you'll need to review and click <strong>Save Workspace</strong> to write them to disk. To get automatic file creation, switch to a tool-capable model (e.g. <code className="mono">llama3.1:8b</code>).
+          </p>
+        </div>
+      )}
+
+      {/* Auto-gen: workspace name + prompt input (before first generate) */}
+      {mode === "auto" && messages.length === 0 && !saved && (
         <div className="shrink-0 px-5 py-4 border-b border-border space-y-3">
           <p className="text-xs text-muted-foreground">
-            Describe your project. The AI will decide which files are needed and generate them in one pass.
+            Describe your project. The AI will decide which files are needed and generate them.
           </p>
+
+          {/* Workspace name — required upfront in tool mode */}
+          {isToolMode && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground w-32 shrink-0">Workspace name</label>
+              <Input
+                value={wsName}
+                onChange={(e) =>
+                  setWsName(e.target.value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, ""))
+                }
+                placeholder="e.g. linkedin-cybersecurity"
+                className="font-mono text-sm h-8 max-w-xs"
+              />
+              <span className="text-[10px] text-muted-foreground">required for auto-save</span>
+            </div>
+          )}
+
           <Textarea
             value={autoPrompt}
             onChange={(e) => setAutoPrompt(e.target.value)}
@@ -214,11 +323,50 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
             onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleGenerate(); }}
           />
           <div className="flex items-center gap-3">
-            <Button onClick={handleGenerate} disabled={!autoPrompt.trim()} className="gap-2">
+            <Button
+              onClick={handleGenerate}
+              disabled={!autoPrompt.trim() || (isToolMode && !wsName.trim())}
+              className="gap-2"
+            >
               <Zap className="w-4 h-4" />
               Generate Workspace
             </Button>
-            <p className="text-[10px] text-muted-foreground">⌘↵ to generate</p>
+            {isToolMode && !wsName.trim() && (
+              <p className="text-[10px] text-warn">Enter a workspace name above first</p>
+            )}
+            {!isToolMode && (
+              <p className="text-[10px] text-muted-foreground">⌘↵ to generate</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Manual mode: workspace name required before Q&A when tool mode */}
+      {mode === "manual" && messages.length === 0 && isToolMode && !streaming && (
+        <div className="shrink-0 px-5 py-4 border-b border-border space-y-3">
+          <p className="text-xs text-muted-foreground">
+            In tool mode, choose a workspace name before we start — the AI will write files directly when it's done with the Q&A.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input
+              value={wsName}
+              onChange={(e) =>
+                setWsName(e.target.value.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_-]/g, ""))
+              }
+              placeholder="e.g. linkedin-cybersecurity"
+              className="font-mono text-sm h-8 max-w-xs"
+              onKeyDown={(e) => { if (e.key === "Enter") startManualWithName(); }}
+              autoFocus
+            />
+            <Button
+              size="sm"
+              onClick={startManualWithName}
+              disabled={!wsName.trim()}
+              className="gap-1.5"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Start Setup
+            </Button>
           </div>
         </div>
       )}
@@ -263,12 +411,48 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
               </div>
             </div>
           )}
+
+          {/* Tool progress panel */}
+          {toolProgress.length > 0 && (
+            <div className="glass-panel rounded-xl px-4 py-3 max-w-sm space-y-1.5">
+              <p className="text-[11px] font-semibold text-primary mb-2 flex items-center gap-1.5">
+                <WrenchIcon className="w-3 h-3" />
+                Writing workspace files…
+              </p>
+              {toolProgress.map((p) => (
+                <div key={p.filename} className="flex items-center gap-2 text-xs">
+                  {p.done ? (
+                    <Check className="w-3.5 h-3.5 text-primary shrink-0" />
+                  ) : (
+                    <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0" />
+                  )}
+                  <span className={`mono ${p.done ? "text-foreground" : "text-muted-foreground"}`}>
+                    {p.filename}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Tool summary / done state */}
+          {saved && isToolMode && (
+            <div className="glass-panel rounded-xl px-4 py-3 max-w-sm flex items-center gap-2 border border-primary/20">
+              <Check className="w-4 h-4 text-primary shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-primary">Workspace created!</p>
+                {toolSummary && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{toolSummary}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           <div ref={chatEndRef} />
         </div>
       </div>
 
       {/* Manual chat input */}
-      {mode === "manual" && (
+      {mode === "manual" && (!isToolMode || messages.length > 0) && !saved && (
         <div className="shrink-0 px-5 py-3 border-t border-border">
           <div className="flex gap-2 max-w-3xl">
             <Input
@@ -278,7 +462,7 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
               placeholder="Your answer…"
               className="text-sm"
               disabled={streaming}
-              autoFocus
+              autoFocus={messages.length > 0}
             />
             <Button
               onClick={handleManualSend}
@@ -293,10 +477,9 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
         </div>
       )}
 
-      {/* Generated files + save section */}
-      {files.length > 0 && (
+      {/* Generated files + save section — only shown in non-tool mode */}
+      {files.length > 0 && !isToolMode && (
         <div className="shrink-0 border-t border-primary/20 bg-primary/5">
-          {/* File tabs header */}
           <div className="flex items-center gap-2 px-5 pt-3 pb-1">
             <FileText className="w-3.5 h-3.5 text-primary" />
             <span className="text-xs font-semibold">Generated Files</span>
@@ -332,7 +515,6 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
             ))}
           </Tabs>
 
-          {/* Save row */}
           <div className="px-5 py-3 flex items-center gap-3">
             <Input
               value={wsName}
@@ -375,7 +557,6 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
 
 // Markdown renderer with circled-number highlighting for Manual mode blanks
 function WsMarkdown({ text }: { text: string }) {
-  // Strip out file blocks from display (they show in the file tabs instead)
   const display = text.replace(/(?:~~~|```)\s*file:[^\s\n]+[\s\S]*?(?:~~~|```)/g, "").trim();
   if (!display) return null;
 
@@ -392,7 +573,6 @@ function WsMarkdown({ text }: { text: string }) {
           );
         }
         if (b.startsWith("| ")) {
-          // Simple table passthrough
           return (
             <pre key={i} className="text-xs font-mono whitespace-pre-wrap opacity-80">{b}</pre>
           );
@@ -423,12 +603,10 @@ function inlineWs(s: string): string {
   return esc
     .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold">$1</strong>')
     .replace(/`([^`]+)`/g, '<code class="mono px-1 py-0.5 rounded bg-muted text-foreground text-[0.85em]">$1</code>')
-    // Highlight circled numbers ①②③ etc. as amber badges
     .replace(
       /([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬])/g,
       '<span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] font-bold mx-0.5">$1</span>',
     )
-    // Highlight [numbered blank] patterns
     .replace(
       /\[([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬][^\]]*)\]/g,
       '<span class="px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-400/10 text-amber-600 dark:text-amber-400 font-mono text-[0.85em]">[$1]</span>',

@@ -70,6 +70,10 @@ export function scaffoldWorkspace(name, overrides = {}) {
   return dest;
 }
 
+export function getWorkspaceDir(name) {
+  return path.join(WORKSPACES_ROOT, name);
+}
+
 export function ensureDefaultWorkspace() {
   const dest = path.join(WORKSPACES_ROOT, "general");
   if (!existsSync(dest)) scaffoldWorkspace("general");
