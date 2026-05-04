@@ -5,7 +5,7 @@ import { AppSidebar } from "@/components/sidebar/AppSidebar";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { ArtifactPanel } from "@/components/chat/ArtifactPanel";
 import { ConfigDetailPanel } from "@/components/config/ConfigDetailPanel";
-import { NewWorkspacePanel } from "@/components/config/NewWorkspacePanel";
+import { WorkspaceCreatorPanel } from "@/components/config/WorkspaceCreatorPanel";
 import { UpdatePanel } from "@/components/config/UpdatePanel";
 import { BackupPanel } from "@/components/config/BackupPanel";
 import {
@@ -224,8 +224,8 @@ const Index = () => {
             />
           )}
           {showNewWs && (
-            <NewWorkspacePanel
-              models={status.models}
+            <WorkspaceCreatorPanel
+              models={status.models.filter((m) => !m.includes("(mock)"))}
               onCreated={handleWorkspaceCreated}
               onCancel={() => setShowNewWorkspace(false)}
             />

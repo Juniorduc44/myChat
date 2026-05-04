@@ -284,8 +284,8 @@ function EmptyState({
           <Sparkles className="w-6 h-6 text-primary-foreground" />
         </div>
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">The folder is memory.</h2>
-          <p className="text-sm text-muted-foreground">The prompt is direction. They work together.</p>
+          <h2 className="text-2xl font-semibold tracking-tight">myChat</h2>
+          <p className="text-sm text-muted-foreground">The folder is memory. The prompt is direction.</p>
         </div>
       </div>
       <p className="text-muted-foreground mb-6 leading-relaxed">

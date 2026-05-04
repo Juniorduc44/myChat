@@ -48,9 +48,9 @@ export function TopBar({ model, setModel, onStatus }: Props) {
             <HardwareIcon className="w-4 h-4 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold leading-tight">Ollama Chat</h1>
+            <h1 className="text-sm font-semibold leading-tight">myChat</h1>
             <p className="text-[10px] mono text-muted-foreground leading-tight">
-              folder-driven · local-first · {status.gpuAvailable ? "GPU" : "CPU"}
+              local-first · folder-driven · {status.gpuAvailable ? "GPU" : "CPU"}
             </p>
           </div>
         </div>

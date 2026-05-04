@@ -71,6 +71,33 @@ export async function deleteModel(model: string): Promise<void> {
   if (!r.ok) throw new Error(`Delete failed: ${r.statusText}`);
 }
 
+export async function* wsBuilderStream(
+  task: string,
+  history: { role: string; content: string }[],
+  model: string,
+  mode: "auto" | "manual" = "auto",
+): AsyncGenerator<NdjsonEvent> {
+  const r = await fetch(`${BASE}/ws-builder`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task, history, model, mode }),
+  });
+  if (!r.ok || !r.body) throw new Error(`/api/ws-builder returned ${r.status}`);
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim()) yield JSON.parse(line) as NdjsonEvent;
+    }
+  }
+}
+
 export async function fetchWorkspaceList(): Promise<WorkspaceListResponse> {
   const r = await fetch(`${BASE}/workspaces`, { signal: AbortSignal.timeout(2000) });
   if (!r.ok) throw new Error(`workspaces fetch failed: ${r.status}`);

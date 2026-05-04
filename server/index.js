@@ -39,6 +39,7 @@ import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFil
 import { searchFTS } from "./lib/retrieval.js";
 import { assemblePrompt, approxTokens } from "./lib/prompt-assembler.js";
 import { streamWorkspaceZip, restoreWorkspaceZip } from "./lib/backup.js";
+import { buildWsBuilderPrompt } from "./lib/ws-builder.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -206,6 +207,41 @@ fastify.put("/api/file", async (req, reply) => {
     return { ok: true };
   } catch (e) {
     return reply.code(400).send({ error: e.message });
+  }
+});
+
+// --- Workspace builder (AI-assisted workspace creation) -------------------
+// POST /api/ws-builder — uses hardcoded 1.3 system prompt, ignores active workspace.
+// Body: { task, history: [{role,content}], model, mode: "auto"|"manual" }
+fastify.post("/api/ws-builder", async (req, reply) => {
+  const { task = "", history = [], model, mode = "auto" } = req.body ?? {};
+  const cfg = activeConfig();
+  const selectedModel = model || cfg.model || "llama3.1:8b";
+  const composed = buildWsBuilderPrompt(task, history, mode);
+
+  reply.raw.setHeader("content-type", "application/x-ndjson");
+  reply.raw.setHeader("cache-control", "no-cache");
+
+  const installed = await ollamaInstalled();
+  if (!installed) {
+    const mock = "[mock] ollama not installed — workspace builder requires a running Ollama instance.";
+    reply.raw.write(JSON.stringify({ type: "delta", text: mock }) + "\n");
+    reply.raw.write(JSON.stringify({ type: "done", tokensOut: approxTokens(mock) }) + "\n");
+    reply.raw.end();
+    return;
+  }
+
+  try {
+    let acc = "";
+    await streamOllama(selectedModel, composed, (chunk) => {
+      acc += chunk;
+      reply.raw.write(JSON.stringify({ type: "delta", text: chunk }) + "\n");
+    });
+    reply.raw.write(JSON.stringify({ type: "done", tokensOut: approxTokens(acc) }) + "\n");
+  } catch (e) {
+    reply.raw.write(JSON.stringify({ type: "error", message: e.message }) + "\n");
+  } finally {
+    reply.raw.end();
   }
 });
 
