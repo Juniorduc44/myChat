@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectSe
 import type { BackendStatus } from "@/lib/types";
 import { checkBackend } from "@/lib/api";
 import { PullModelDialog } from "@/components/config/PullModelDialog";
+import { getModelCaps, loadCapDefs, COLOR_CLASSES } from "@/lib/capabilities";
 
 interface Props {
   model: string;
@@ -39,6 +40,7 @@ export function TopBar({ model, setModel, onStatus }: Props) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const HardwareIcon = status.gpuAvailable ? Zap : Cpu;
+  const capDefs = loadCapDefs();
 
   return (
     <>
@@ -76,20 +78,33 @@ export function TopBar({ model, setModel, onStatus }: Props) {
 
           {/* Model selector */}
           <Select value={model} onValueChange={(v) => v !== "__pull__" && setModel(v)}>
-            <SelectTrigger className="h-9 w-52 mono text-xs">
+            <SelectTrigger className="h-9 w-64 mono text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {status.models.map((m) => (
-                <SelectItem key={m} value={m} className="mono text-xs">
-                  <span className="flex items-center gap-2">
-                    {m}
-                    {m.endsWith(":cloud") && (
-                      <span className="text-[10px] text-primary opacity-70">cloud</span>
-                    )}
-                  </span>
-                </SelectItem>
-              ))}
+              {status.models.map((m) => {
+                const caps = getModelCaps(m);
+                return (
+                  <SelectItem key={m} value={m} className="mono text-xs">
+                    <span className="flex items-center gap-1.5 w-full">
+                      <span className="flex-1 truncate">{m}</span>
+                      {caps.map((capId) => {
+                        const def = capDefs.find((d) => d.id === capId);
+                        if (!def) return null;
+                        const cls = COLOR_CLASSES[def.color] ?? COLOR_CLASSES.primary;
+                        return (
+                          <span
+                            key={capId}
+                            className={`shrink-0 text-[9px] px-1 py-0.5 rounded border font-medium ${cls.border} ${cls.bg} ${cls.text}`}
+                          >
+                            {def.label}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </SelectItem>
+                );
+              })}
               {status.reachable && (
                 <>
                   <SelectSeparator />

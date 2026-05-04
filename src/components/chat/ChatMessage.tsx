@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { User, Bot, FileSearch, MoreHorizontal, Copy, Trash2, Download, PenLine, CopyPlus } from "lucide-react";
+import { User, Bot, FileSearch, MoreHorizontal, Copy, Trash2, Download, PenLine, CopyPlus, FileText } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,7 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { ChatMessage as ChatMessageT } from "@/lib/types";
+import type { ChatMessage as ChatMessageT, Attachment } from "@/lib/types";
 
 interface Props {
   message: ChatMessageT;
@@ -58,6 +58,10 @@ export function ChatMessage({ message, onInspect, onDelete, onDuplicate, onSaveA
               : "glass-panel rounded-tl-sm",
           )}
         >
+          {/* Attachment previews — shown above the text for user messages */}
+          {isUser && message.attachments && message.attachments.length > 0 && (
+            <AttachmentRow attachments={message.attachments} />
+          )}
           <Markdown text={message.content} />
           {!isUser && message.content === "" && (
             <span className="caret inline-block w-2 h-4 bg-primary align-middle" />
@@ -161,6 +165,38 @@ export function ChatMessage({ message, onInspect, onDelete, onDuplicate, onSaveA
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AttachmentRow({ attachments }: { attachments: Attachment[] }) {
+  return (
+    <div className="flex flex-wrap gap-2 mb-2">
+      {attachments.map((att) => {
+        if (att.type === "image") {
+          return (
+            <a key={att.id} href={att.content} target="_blank" rel="noreferrer" title={att.name}>
+              <img
+                src={att.content}
+                alt={att.name}
+                className="max-h-40 max-w-xs rounded-lg border border-white/20 object-cover cursor-zoom-in hover:opacity-90 transition-opacity"
+              />
+            </a>
+          );
+        }
+        const isPdf = att.type === "pdf";
+        return (
+          <div
+            key={att.id}
+            title={att.name}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-md border border-white/20 bg-white/10 text-[10px] max-w-[180px]"
+          >
+            <FileText className="w-3.5 h-3.5 shrink-0 opacity-80" />
+            <span className="truncate">{att.name}</span>
+            {isPdf && <span className="shrink-0 opacity-60 uppercase text-[9px] font-bold">pdf</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }

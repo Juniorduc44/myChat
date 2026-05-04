@@ -207,10 +207,30 @@ export type NdjsonEvent =
   | { type: "tool_done"; tool: string; filename: string }
   | { type: "workspace_saved"; name: string; summary: string };
 
+export async function uploadAttachment(file: File): Promise<import("./types").Attachment> {
+  const form = new FormData();
+  form.append("file", file);
+  const r = await fetch(`${BASE}/upload`, { method: "POST", body: form });
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText })) as { error: string };
+    throw new Error(err.error ?? r.statusText);
+  }
+  const data = await r.json() as { type: string; name: string; content: string; mimeType: string; sizeBytes: number };
+  return {
+    id: crypto.randomUUID(),
+    name: data.name,
+    type: data.type as "text" | "image" | "pdf",
+    content: data.content,
+    mimeType: data.mimeType,
+    sizeBytes: data.sizeBytes,
+  };
+}
+
 export async function* chatStream(
   task: string,
   history: ChatMessage[],
   model: string,
+  attachments: import("./types").Attachment[] = [],
 ): AsyncGenerator<NdjsonEvent> {
   const r = await fetch(`${BASE}/chat`, {
     method: "POST",
@@ -219,6 +239,7 @@ export async function* chatStream(
       task,
       history: history.map((m) => ({ role: m.role, content: m.content })),
       model,
+      attachments: attachments.map((a) => ({ type: a.type, name: a.name, content: a.content })),
     }),
   });
   if (!r.ok || !r.body) throw new Error(`/api/chat returned ${r.status}`);

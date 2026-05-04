@@ -104,6 +104,36 @@ function streamOllama(model, prompt, onChunk) {
   });
 }
 
+// REST-based streaming chat — supports images field for vision models.
+async function ollamaChatStreamRest(model, messages, onChunk) {
+  const r = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, messages, stream: true }),
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!r.ok) throw new Error(`Ollama REST chat error: ${r.status}`);
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.message?.content) onChunk(ev.message.content);
+        if (ev.done) return ev.eval_count ?? 0;
+      } catch { /* skip malformed */ }
+    }
+  }
+  return 0;
+}
+
 // Check whether a model advertises the "tools" capability via Ollama REST API.
 async function checkModelSupportsTools(model) {
   try {
@@ -374,6 +404,64 @@ fastify.post("/api/ws-builder", async (req, reply) => {
   }
 });
 
+// --- File upload (attachments) --------------------------------------------
+// POST /api/upload — multipart "file" field
+// Returns: { type: "text"|"image", name, content, mimeType, sizeBytes }
+fastify.post("/api/upload", async (req, reply) => {
+  let data;
+  try {
+    data = await req.file();
+  } catch {
+    return reply.code(400).send({ error: "Expected multipart file upload" });
+  }
+  if (!data) return reply.code(400).send({ error: "No file provided" });
+
+  const name = data.filename;
+  const mime = data.mimetype;
+  const chunks = [];
+  for await (const chunk of data.file) chunks.push(chunk);
+  const buf = Buffer.concat(chunks);
+
+  // Image files — return base64 data URL
+  if (mime.startsWith("image/")) {
+    const b64 = buf.toString("base64");
+    return {
+      type: "image",
+      name,
+      content: `data:${mime};base64,${b64}`,
+      mimeType: mime,
+      sizeBytes: buf.length,
+    };
+  }
+
+  // PDF — extract text
+  if (mime === "application/pdf" || name.endsWith(".pdf")) {
+    try {
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: buf });
+      const result = await parser.getText();
+      return {
+        type: "pdf",
+        name,
+        content: result.text,
+        mimeType: mime,
+        sizeBytes: buf.length,
+      };
+    } catch (e) {
+      return reply.code(500).send({ error: `PDF extraction failed: ${e.message}` });
+    }
+  }
+
+  // Plain text / markdown — decode as UTF-8
+  return {
+    type: "text",
+    name,
+    content: buf.toString("utf8"),
+    mimeType: mime,
+    sizeBytes: buf.length,
+  };
+});
+
 // --- Search & chat --------------------------------------------------------
 fastify.post("/api/search", async (req) => {
   const { q, k = 5 } = req.body ?? {};
@@ -383,11 +471,23 @@ fastify.post("/api/search", async (req) => {
 fastify.post("/api/chat", async (req, reply) => {
   const dir = getActiveWorkspaceDir();
   const cfg = activeConfig();
-  const { task, history = [], model = cfg.model || "llama3" } = req.body ?? {};
-  const snippets = task ? searchFTS(dir, task, cfg.retrieval?.topK ?? 5) : [];
+  const { task, history = [], model = cfg.model || "llama3", attachments = [] } = req.body ?? {};
+
+  // Prepend text/pdf attachment content to the task
+  let augmentedTask = task;
+  const imageAttachments = attachments.filter((a) => a.type === "image");
+  const textAttachments = attachments.filter((a) => a.type !== "image");
+  if (textAttachments.length > 0) {
+    const contextBlocks = textAttachments
+      .map((a) => `## Attached: ${a.name}\n\n\`\`\`\n${a.content}\n\`\`\``)
+      .join("\n\n");
+    augmentedTask = contextBlocks + (task ? `\n\n${task}` : "");
+  }
+
+  const snippets = augmentedTask ? searchFTS(dir, augmentedTask, cfg.retrieval?.topK ?? 5) : [];
   const prompt = assemblePrompt({
     workspaceDir: dir,
-    task,
+    task: augmentedTask,
     history,
     snippets,
     tokenBudget: cfg.tokenBudget,
@@ -408,11 +508,26 @@ fastify.post("/api/chat", async (req, reply) => {
 
   try {
     let acc = "";
-    await streamOllama(model, prompt.composed, (chunk) => {
-      acc += chunk;
-      reply.raw.write(JSON.stringify({ type: "delta", text: chunk }) + "\n");
-    });
-    reply.raw.write(JSON.stringify({ type: "done", tokensOut: approxTokens(acc) }) + "\n");
+    if (imageAttachments.length > 0) {
+      // Vision path: use Ollama REST API with images field
+      const images = imageAttachments.map((a) => a.content.replace(/^data:[^;]+;base64,/, ""));
+      const restMessages = [
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user", content: prompt.composed, images },
+      ];
+      const tokensOut = await ollamaChatStreamRest(model, restMessages, (chunk) => {
+        acc += chunk;
+        reply.raw.write(JSON.stringify({ type: "delta", text: chunk }) + "\n");
+      });
+      reply.raw.write(JSON.stringify({ type: "done", tokensOut }) + "\n");
+    } else {
+      // CLI streaming path (faster for text-only)
+      await streamOllama(model, prompt.composed, (chunk) => {
+        acc += chunk;
+        reply.raw.write(JSON.stringify({ type: "delta", text: chunk }) + "\n");
+      });
+      reply.raw.write(JSON.stringify({ type: "done", tokensOut: approxTokens(acc) }) + "\n");
+    }
   } catch (e) {
     reply.raw.write(JSON.stringify({ type: "error", message: e.message }) + "\n");
   } finally {

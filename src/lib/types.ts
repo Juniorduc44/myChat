@@ -8,6 +8,7 @@ export interface ChatMessage {
   tokensOut?: number;
   prompt?: AssembledPrompt;
   createdAt: number;
+  attachments?: Attachment[];
 }
 
 export interface RetrievedSnippet {
@@ -107,4 +108,13 @@ export interface WorkspaceListResponse {
 export interface ArtifactFile {
   filename: string;
   content: string;
+}
+
+export interface Attachment {
+  id: string;
+  name: string;
+  type: "text" | "image" | "pdf";
+  content: string;      // text content for text/pdf; base64 data URL for image
+  mimeType: string;
+  sizeBytes: number;
 }
