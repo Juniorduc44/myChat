@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# install.sh — Linux one-command installer for Ollama Chat.
+# install.sh — Linux one-command installer for myChat.
 #
 # Usage:
-#   curl -fsSL https://your-repo/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Juniorduc44/mychat/main/scripts/install.sh | bash
 #   ./install.sh
 #
 # Idempotent: re-running upgrades the app and skips already-installed deps.
@@ -12,9 +12,9 @@
 
 set -euo pipefail
 
-APP_DIR="${OLLAMA_CHAT_DIR:-$HOME/.local/share/ollama-chat}"
-WORKSPACES_ROOT="$HOME/ollama-chat-workspaces"
-REPO_URL="${OLLAMA_CHAT_REPO:-https://github.com/YOUR_USER/ollama-chat}"
+APP_DIR="${MYCHAT_DIR:-$HOME/.local/share/mychat}"
+WORKSPACES_ROOT="${OLLAMA_CHAT_WORKSPACES:-$HOME/ollama-chat-workspaces}"
+REPO_URL="${MYCHAT_REPO:-https://github.com/Juniorduc44/mychat}"
 NODE_MIN=18
 
 c_green() { printf "\033[32m%s\033[0m\n" "$*"; }
@@ -89,7 +89,7 @@ ok "workspaces root ready (general workspace created on first run)"
 
 # ---------------------------------------------------------------- 6. Launcher
 step "Installing launcher"
-LAUNCHER="$HOME/.local/bin/ollama-chat"
+LAUNCHER="$HOME/.local/bin/mychat"
 mkdir -p "$(dirname "$LAUNCHER")"
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
@@ -105,11 +105,11 @@ esac
 
 # ---------------------------------------------------------------- 8. Desktop entry (optional)
 if [ -d "$HOME/.local/share/applications" ] || mkdir -p "$HOME/.local/share/applications"; then
-  cat > "$HOME/.local/share/applications/ollama-chat.desktop" <<EOF
+  cat > "$HOME/.local/share/applications/mychat.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Ollama Chat
-Comment=Folder-driven local-first Ollama chat
+Name=myChat
+Comment=Local-first AI chat powered by Ollama
 Exec=$LAUNCHER
 Icon=utilities-terminal
 Terminal=false
@@ -125,5 +125,5 @@ c_green "  App        : $APP_DIR"
 c_green "  Workspaces : $WORKSPACES_ROOT"
 c_green "  Launcher   : $LAUNCHER"
 c_green ""
-c_blue  "Starting Ollama Chat…"
+c_blue  "Starting myChat…"
 exec "$LAUNCHER"

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# uninstall.sh — remove app + launcher. Workspace is preserved by default.
+# uninstall.sh — remove app + launcher. Workspaces are preserved by default.
 set -euo pipefail
-APP_DIR="${OLLAMA_CHAT_DIR:-$HOME/.local/share/ollama-chat}"
-LAUNCHER="$HOME/.local/bin/ollama-chat"
-DESKTOP="$HOME/.local/share/applications/ollama-chat.desktop"
-WORKSPACE_DIR="${OLLAMA_CHAT_WORKSPACE:-$HOME/ollama-chat-workspace}"
+APP_DIR="${MYCHAT_DIR:-$HOME/.local/share/mychat}"
+LAUNCHER="$HOME/.local/bin/mychat"
+DESKTOP="$HOME/.local/share/applications/mychat.desktop"
+WORKSPACES_ROOT="${OLLAMA_CHAT_WORKSPACES:-$HOME/ollama-chat-workspaces}"
 
 rm -rf "$APP_DIR" && echo "removed $APP_DIR"
 rm -f  "$LAUNCHER" && echo "removed $LAUNCHER"
 rm -f  "$DESKTOP"  && echo "removed $DESKTOP"
 
 if [ "${1:-}" = "--purge" ]; then
-  rm -rf "$WORKSPACE_DIR" && echo "purged workspace $WORKSPACE_DIR"
+  rm -rf "$WORKSPACES_ROOT" && echo "purged workspaces $WORKSPACES_ROOT"
 else
-  echo "workspace preserved at $WORKSPACE_DIR (pass --purge to remove)"
+  echo "workspaces preserved at $WORKSPACES_ROOT (pass --purge to remove)"
 fi
