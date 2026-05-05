@@ -16,6 +16,7 @@
   },
   "ui": {
     "showTokenStats": true,
-    "showProvenance": true
+    "showProvenance": true,
+    "autoOpenBrowser": true
   }
 }
