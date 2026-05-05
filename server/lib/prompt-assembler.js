@@ -95,7 +95,9 @@ export function assemblePrompt({ workspaceDir, task, history = [], snippets = []
     `# Task\n${sections.task}\n\n` +
     `# Context\n${sections.context}\n\n` +
     `# Constraints\n${sections.constraints.map((c) => `- ${c}`).join("\n")}\n\n` +
-    `# Output Format\n${sections.outputFormat}\n`;
+    `# Output Format\n${sections.outputFormat}\n\n` +
+    `---\n` +
+    `Write only your answer to the Task. Do not echo or restate the Identity, Context, Constraints, or Output Format sections. Begin your response directly.\n`;
 
   const tokens = {
     identity: approxTokens(sections.identity),

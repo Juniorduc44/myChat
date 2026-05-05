@@ -88,13 +88,11 @@ const FILE_TEMPLATES = `
 # Identity
 You are a [ROLE] helping [NAME/TEAM] with [PROJECT].
 
-## Your Method (Clief Notes 1.3 — Five-Part Prompt Structure)
-Every response follows this framework:
-1. Identity   — who you are (this file)
-2. Task       — what the user needs (their message)
-3. Context    — background (CONTEXT.md + retrieved snippets)
-4. Constraints — what to avoid (rules below + per-message)
-5. Output Format — shape of the result (templates/default.prompt)
+## How this workspace works
+The system assembles context from five sources before each message reaches you:
+Identity (this file) · Task (the user's message) · Context (CONTEXT.md + retrieved snippets) · Constraints · Output Format (templates/default.prompt).
+
+**Your job is to answer the Task.** Do not echo, restate, or reproduce any of the framework sections in your response. Begin directly with the deliverable.
 
 ## Rules
 - [Rule 1 — specific to this workspace]
@@ -162,34 +160,20 @@ Notes: model default = llama3.1:8b. For long-form content set maxTotal to 16384.
 For semantic search change engine to "embeddings".
 
 ### templates/default.prompt (only when every response must follow a fixed shape)
+Describe ONLY the desired output shape — not a prompt template. The AI should be told
+what to produce, not given a form to fill in. Example for a LinkedIn post workspace:
 \`\`\`
-## [IDENTITY]
-# Override only if shifting roles for this task.
-# Leave blank to use CLAUDE.md.
+# Output format
 
-
-## [TASK]
-# One clear thing. Action verb + scope.
-# Test: could a stranger attempt this without five follow-up questions?
-
-
-## [CONTEXT]
-# Per-task background. Project context loads from CONTEXT.md automatically.
-
-
-## [CONSTRAINTS]
-# What to avoid. One constraint per line.
-# -
-# -
-
-
-## [OUTPUT FORMAT]
-# The shape of the result.
+- Headline (10 words max, title case)
+- Body (150-200 words, plain language, one key takeaway)
+- Call-to-action (1 sentence)
+- Hashtags (#Cybersecurity first, then 4 more specific tags)
 \`\`\`
 
 ### templates/[task-name].prompt (only for recurring task types)
-Same structure as default.prompt but pre-filled with the specific task shape.
-Example: templates/code-review.prompt, templates/blog-post.prompt
+Same principle — describe the output shape for that specific task type.
+Example: templates/code-review.prompt, templates/linkedin-post.prompt
 
 ### snippets/[name].md (only if user will reuse content blocks)
 \`\`\`

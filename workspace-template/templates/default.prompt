@@ -1,22 +1,11 @@
-## [IDENTITY]
-# Override only if shifting roles for this task.
-# Leave blank to use CLAUDE.md.
+# Output format
 
+Respond in plain markdown. Put code in fenced blocks.
+One clear deliverable per response — no preamble, no summary of what you did.
 
-## [TASK]
-# One clear thing. Action verb + scope.
-# Test: could a stranger attempt this without five follow-up questions?
-
-
-## [CONTEXT]
-# Per-task background. Project context loads from CONTEXT.md automatically.
-
-
-## [CONSTRAINTS]
-# What to avoid. One constraint per line.
-# -
-# -
-
-
-## [OUTPUT FORMAT]
-# The shape of the result.
+# Replace the lines below with the specific output shape for your project.
+# Example for a LinkedIn post workspace:
+#   - Headline (10 words max)
+#   - Body (150-200 words, plain language)
+#   - Call-to-action (1 sentence)
+#   - Hashtags (5, most specific first)
