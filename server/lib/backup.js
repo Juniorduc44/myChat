@@ -4,9 +4,7 @@ import archiver from "archiver";
 import unzipper from "unzipper";
 import { mkdirSync, existsSync, createWriteStream } from "node:fs";
 import path from "node:path";
-import os from "node:os";
-
-const WORKSPACES_ROOT = path.join(os.homedir(), "ollama-chat-workspaces");
+import { WORKSPACES_ROOT } from "./workspaceManager.js";
 
 // Stream a zip of one workspace (name) or all workspaces (name omitted) to reply.raw.
 export function streamWorkspaceZip(reply, name) {

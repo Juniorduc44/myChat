@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Zap, ListChecks, ChevronLeft, Send, Loader2, Save,
   Check, AlertCircle, FileText, Bot, WrenchIcon, CircleAlert,
+  FolderOpen, ArrowRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,6 +41,11 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
   const [toolProgress, setToolProgress] = useState<ToolProgress[]>([]);
   const [toolSummary, setToolSummary] = useState("");
 
+  // Confirmation overlay shown after workspace is written to disk
+  const [confirm, setConfirm] = useState<{
+    name: string; path: string; files: string[]; summary: string;
+  } | null>(null);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const liveModel = models.find((m) => !m.includes("(mock)")) ?? "";
@@ -71,6 +77,7 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
     setToolProgress([]);
     let acc = "";
     let autoSaved = false;
+    const autoSavedMeta = { path: "", files: [] as string[], summary: "" };
 
     try {
       const nameToUse = toolsSupported ? wsName : undefined;
@@ -88,8 +95,14 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
             prev.map((p) => p.filename === ev.filename ? { ...p, done: true } : p),
           );
         } else if (ev.type === "workspace_saved") {
-          setToolSummary(ev.summary);
+          setToolSummary(ev.summary ?? "");
           autoSaved = true;
+          // Capture path and files for the confirmation overlay
+          Object.assign(autoSavedMeta, {
+            path: ev.path ?? "",
+            files: ev.files ?? [],
+            summary: ev.summary ?? "",
+          });
         } else if (ev.type === "done" || ev.type === "error") {
           break;
         }
@@ -99,12 +112,9 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
       setLiveText("");
 
       if (autoSaved) {
-        // Tool mode: files written to disk — switch and navigate
         setSaved(true);
-        try {
-          await switchWorkspace(wsName);
-        } catch { /* already active or just created */ }
-        setTimeout(() => onCreated(wsName), 800);
+        try { await switchWorkspace(wsName); } catch { /* already active or just created */ }
+        setConfirm({ name: wsName, ...autoSavedMeta });
         return;
       }
 
@@ -156,7 +166,12 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
       await switchWorkspace(name);
       for (const f of files) await saveFileContent(f.filename, f.content);
       setSaved(true);
-      setTimeout(() => onCreated(name), 700);
+      setConfirm({
+        name,
+        path: `~/ollama-chat-workspaces/${name}`,
+        files: files.map((f) => f.filename),
+        summary: "",
+      });
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
       setSaving(false);
@@ -253,7 +268,76 @@ export function WorkspaceCreatorPanel({ models, onCreated, onCancel }: Props) {
   const toolsChecking = toolsSupported === null;
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 relative">
+      {/* Confirmation overlay */}
+      {confirm && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="w-full max-w-md mx-6 rounded-xl border border-primary/30 bg-card shadow-xl p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Check className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-primary">Workspace created!</p>
+                <p className="text-xs text-muted-foreground mono mt-0.5">{confirm.name}</p>
+              </div>
+            </div>
+
+            {/* Path */}
+            <div className="rounded-lg bg-muted/40 border border-border px-3 py-2.5">
+              <p className="text-[10px] text-muted-foreground font-medium mb-1">Location on disk</p>
+              <div className="flex items-center gap-2">
+                <FolderOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+                <code className="mono text-xs text-foreground truncate flex-1">
+                  {confirm.path || `~/ollama-chat-workspaces/${confirm.name}`}
+                </code>
+              </div>
+            </div>
+
+            {/* Files written */}
+            {confirm.files.length > 0 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground font-medium mb-1.5">
+                  Files written ({confirm.files.length})
+                </p>
+                <ul className="space-y-1 max-h-32 overflow-y-auto">
+                  {confirm.files.map((f) => (
+                    <li key={f} className="flex items-center gap-2 text-xs">
+                      <Check className="w-3 h-3 text-primary shrink-0" />
+                      <span className="mono text-foreground truncate">{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Summary */}
+            {confirm.summary && (
+              <p className="text-xs text-muted-foreground leading-relaxed border-t border-border pt-3">
+                {confirm.summary}
+              </p>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                className="flex-1 gap-2"
+                onClick={() => { setConfirm(null); onCreated(confirm.name); }}
+              >
+                <ArrowRight className="w-3.5 h-3.5" />
+                Open Workspace
+              </Button>
+              <Button
+                variant="outline"
+                className="shrink-0 text-xs"
+                onClick={() => setConfirm(null)}
+              >
+                Keep building
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="shrink-0 flex items-center gap-2 px-5 py-3 border-b border-border">
         <button onClick={reset} className="p-1 rounded hover:bg-muted transition-colors">

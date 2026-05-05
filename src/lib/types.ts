@@ -65,12 +65,22 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+export interface ModelInfo {
+  capabilities: string[];
+  sizeGB?: number;
+  paramSize?: string;
+  family?: string;
+  quantization?: string;
+  isCloud?: boolean;
+}
+
 export interface BackendStatus {
   reachable: boolean;
   ollamaInstalled: boolean;
   models: string[];
   port?: number;
   gpuAvailable?: boolean;
+  modelDetails?: Record<string, ModelInfo>;
 }
 
 export interface SubmoduleStatus {
@@ -91,7 +101,13 @@ export type SelectedView =
   | { type: "file"; file: WorkspaceFile }
   | { type: "update" }
   | { type: "backup" }
+  | { type: "settings" }
   | null;
+
+export interface AppSettings {
+  workspaceRoot: string;
+  trustedDirs: string[];
+}
 
 export interface WorkspaceInfo {
   name: string;

@@ -8,6 +8,7 @@ import { ConfigDetailPanel } from "@/components/config/ConfigDetailPanel";
 import { WorkspaceCreatorPanel } from "@/components/config/WorkspaceCreatorPanel";
 import { UpdatePanel } from "@/components/config/UpdatePanel";
 import { BackupPanel } from "@/components/config/BackupPanel";
+import { SettingsPanel } from "@/components/config/SettingsPanel";
 import {
   fetchWorkspaceFiles,
   fetchWorkspaceList,
@@ -164,8 +165,9 @@ const Index = () => {
   const showUpdate = selectedView?.type === "update";
   const showFile = selectedView?.type === "file";
   const showBackup = selectedView?.type === "backup";
+  const showSettings = selectedView?.type === "settings";
   const showNewWs = showNewWorkspace;
-  const showChat = !showUpdate && !showFile && !showNewWs && !showBackup;
+  const showChat = !showUpdate && !showFile && !showNewWs && !showBackup && !showSettings;
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
@@ -204,6 +206,7 @@ const Index = () => {
         />
 
         <main className="flex-1 min-w-0 flex flex-col bg-gradient-paper overflow-hidden">
+          {showSettings && <SettingsPanel mockMode={mockMode} />}
           {showUpdate && <UpdatePanel mockMode={mockMode} />}
           {showBackup && (
             <BackupPanel

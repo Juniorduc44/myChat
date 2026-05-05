@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   MessageSquare, Settings2, Plus, Trash2, FolderTree,
   Sparkles, BookMarked, Library, FileText, Box, FileJson,
-  ChevronRight, Zap, ArrowUpCircle, GitBranch, Archive,
+  ChevronRight, Zap, ArrowUpCircle, GitBranch, Archive, SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -85,6 +85,7 @@ export function AppSidebar({
     selectedView?.type === "file" ? selectedView.file.path : null;
   const updateSelected = selectedView?.type === "update";
   const backupSelected = selectedView?.type === "backup";
+  const settingsSelected = selectedView?.type === "settings";
 
   return (
     <aside className="w-72 shrink-0 border-r border-border bg-card/40 backdrop-blur-sm flex flex-col h-full">
@@ -269,6 +270,22 @@ export function AppSidebar({
                 />
                 <span className="flex-1 text-xs">Backup &amp; Restore</span>
                 {backupSelected && <ChevronRight className="w-3 h-3 shrink-0 text-primary" />}
+              </button>
+              <button
+                onClick={() => onSelectView({ type: "settings" })}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-left group transition-colors ${
+                  settingsSelected
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "hover:bg-muted text-foreground"
+                }`}
+              >
+                <SlidersHorizontal
+                  className={`w-3.5 h-3.5 shrink-0 ${
+                    settingsSelected ? "text-primary" : "text-muted-foreground group-hover:text-primary"
+                  }`}
+                />
+                <span className="flex-1 text-xs">Settings</span>
+                {settingsSelected && <ChevronRight className="w-3 h-3 shrink-0 text-primary" />}
               </button>
             </div>
             <Separator />

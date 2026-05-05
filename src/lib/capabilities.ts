@@ -28,11 +28,12 @@ export const COLOR_CLASSES: Record<string, { border: string; bg: string; text: s
 };
 
 export const BUILTIN_CAPS: CapDef[] = [
-  { id: "tools",  label: "tools",  color: "violet",  builtIn: true },
-  { id: "vision", label: "vision", color: "blue",    builtIn: true },
-  { id: "code",   label: "code",   color: "green",   builtIn: true },
-  { id: "cloud",  label: "cloud",  color: "primary", builtIn: true },
-  { id: "embed",  label: "embed",  color: "teal",    builtIn: true },
+  { id: "tools",    label: "tools",    color: "violet",  builtIn: true },
+  { id: "thinking", label: "thinking", color: "amber",   builtIn: true },
+  { id: "vision",   label: "vision",   color: "blue",    builtIn: true },
+  { id: "code",     label: "code",     color: "green",   builtIn: true },
+  { id: "cloud",    label: "cloud",    color: "primary", builtIn: true },
+  { id: "embed",    label: "embed",    color: "teal",    builtIn: true },
 ];
 
 const CAPS_DEFS_KEY = "mychat-cap-defs";
@@ -79,6 +80,7 @@ export function inferCaps(modelName: string, ollamaCaps: string[] = []): string[
   const caps: string[] = [];
 
   if (ollamaCaps.includes("tools")) caps.push("tools");
+  if (ollamaCaps.includes("thinking")) caps.push("thinking");
   if (ollamaCaps.includes("vision")) caps.push("vision");
 
   if (n.endsWith(":cloud")) caps.push("cloud");

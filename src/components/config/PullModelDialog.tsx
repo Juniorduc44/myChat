@@ -13,18 +13,20 @@ import {
   CapDef, CAP_COLORS, COLOR_CLASSES, loadCapDefs, saveCapDefs,
   loadModelCaps, setModelCaps, getModelCaps, inferCaps,
 } from "@/lib/capabilities";
+import type { ModelInfo } from "@/lib/types";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onModelAdded: (model: string) => void;
   installedModels: string[];
+  modelDetails?: Record<string, ModelInfo>;
 }
 
 type PullState = "idle" | "pulling" | "done" | "error";
 type Tab = "installed" | "pull" | "caps";
 
-export function PullModelDialog({ open, onClose, onModelAdded, installedModels }: Props) {
+export function PullModelDialog({ open, onClose, onModelAdded, installedModels, modelDetails }: Props) {
   const [tab, setTab] = useState<Tab>("installed");
   const [modelName, setModelName] = useState("");
   const [state, setState] = useState<PullState>("idle");
@@ -101,7 +103,7 @@ export function PullModelDialog({ open, onClose, onModelAdded, installedModels }
 
   function startEditCaps(model: string) {
     setEditingModel(model);
-    setEditCaps(getModelCaps(model));
+    setEditCaps(getModelCaps(model, modelDetails?.[model]?.capabilities ?? []));
   }
 
   function toggleEditCap(capId: string) {
@@ -132,13 +134,15 @@ export function PullModelDialog({ open, onClose, onModelAdded, installedModels }
     saveCapDefs(next);
   }
 
+  const ollamaCaps = (m: string) => modelDetails?.[m]?.capabilities ?? [];
+
   // Filtered model list
   const filteredModels = filterCap === "all"
     ? installedModels
-    : installedModels.filter((m) => getModelCaps(m).includes(filterCap));
+    : installedModels.filter((m) => getModelCaps(m, ollamaCaps(m)).includes(filterCap));
 
   // Unique caps across all installed models (for filter bar)
-  const allUsedCaps = [...new Set(installedModels.flatMap((m) => getModelCaps(m)))];
+  const allUsedCaps = [...new Set(installedModels.flatMap((m) => getModelCaps(m, ollamaCaps(m))))];
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) { reset(); onClose(); } }}>
@@ -190,7 +194,7 @@ export function PullModelDialog({ open, onClose, onModelAdded, installedModels }
                     const def = capDefs.find((d) => d.id === capId);
                     if (!def) return null;
                     const cls = COLOR_CLASSES[def.color] ?? COLOR_CLASSES.primary;
-                    const count = installedModels.filter((m) => getModelCaps(m).includes(capId)).length;
+                    const count = installedModels.filter((m) => getModelCaps(m, ollamaCaps(m)).includes(capId)).length;
                     return (
                       <button
                         key={capId}
@@ -218,12 +222,28 @@ export function PullModelDialog({ open, onClose, onModelAdded, installedModels }
                 ) : (
                   <ul className="space-y-1.5">
                     {filteredModels.map((m) => {
-                      const caps = getModelCaps(m);
+                      const caps = getModelCaps(m, ollamaCaps(m));
+                      const info = modelDetails?.[m];
                       const isEditing = editingModel === m;
                       return (
                         <li key={m} className="rounded-lg border border-border bg-card/40 hover:bg-card transition-colors">
                           <div className="flex items-center gap-2 px-3 py-2">
-                            <span className="mono text-xs text-foreground flex-1 truncate">{m}</span>
+                            <div className="flex-1 min-w-0">
+                              <span className="mono text-xs text-foreground truncate block">{m}</span>
+                              {(info?.paramSize || info?.sizeGB !== undefined || info?.quantization) && (
+                                <span className="flex items-center gap-1.5 mt-0.5">
+                                  {info.paramSize && (
+                                    <span className="text-[9px] text-muted-foreground mono">{info.paramSize}</span>
+                                  )}
+                                  {info.sizeGB !== undefined && (
+                                    <span className="text-[9px] text-muted-foreground">{info.sizeGB} GB</span>
+                                  )}
+                                  {info.quantization && (
+                                    <span className="text-[9px] text-muted-foreground/50 mono">{info.quantization}</span>
+                                  )}
+                                </span>
+                              )}
+                            </div>
                             {/* Capability badges */}
                             <div className="flex items-center gap-1 shrink-0">
                               {caps.map((capId) => {
@@ -297,8 +317,9 @@ export function PullModelDialog({ open, onClose, onModelAdded, installedModels }
                                   variant="outline"
                                   className="h-6 text-[10px] px-2"
                                   onClick={() => {
-                                    setModelCaps(m, inferCaps(m));
-                                    setEditCaps(inferCaps(m));
+                                    const auto = inferCaps(m, ollamaCaps(m));
+                                    setModelCaps(m, auto);
+                                    setEditCaps(auto);
                                   }}
                                 >
                                   Reset to auto-detect

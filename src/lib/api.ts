@@ -205,7 +205,7 @@ export type NdjsonEvent =
   | { type: "workspace_created"; name: string }
   | { type: "tool_call"; tool: string; filename: string }
   | { type: "tool_done"; tool: string; filename: string }
-  | { type: "workspace_saved"; name: string; summary: string };
+  | { type: "workspace_saved"; name: string; summary: string; path?: string; files?: string[] };
 
 export async function uploadAttachment(file: File): Promise<import("./types").Attachment> {
   const form = new FormData();
@@ -256,4 +256,18 @@ export async function* chatStream(
       if (line.trim()) yield JSON.parse(line) as NdjsonEvent;
     }
   }
+}
+
+export async function fetchSettings(): Promise<import("./types").AppSettings> {
+  const r = await fetch(`${BASE}/settings`);
+  if (!r.ok) return { workspaceRoot: "~/ollama-chat-workspaces", trustedDirs: [] };
+  return r.json();
+}
+
+export async function saveSettings(settings: Partial<import("./types").AppSettings>): Promise<void> {
+  await fetch(`${BASE}/settings`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings),
+  });
 }

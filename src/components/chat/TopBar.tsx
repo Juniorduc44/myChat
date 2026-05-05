@@ -83,11 +83,15 @@ export function TopBar({ model, setModel, onStatus }: Props) {
             </SelectTrigger>
             <SelectContent>
               {status.models.map((m) => {
-                const caps = getModelCaps(m);
+                const info = status.modelDetails?.[m];
+                const caps = getModelCaps(m, info?.capabilities ?? []);
                 return (
                   <SelectItem key={m} value={m} className="mono text-xs">
                     <span className="flex items-center gap-1.5 w-full">
                       <span className="flex-1 truncate">{m}</span>
+                      {info?.paramSize && (
+                        <span className="shrink-0 text-[9px] text-muted-foreground">{info.paramSize}</span>
+                      )}
                       {caps.map((capId) => {
                         const def = capDefs.find((d) => d.id === capId);
                         if (!def) return null;
@@ -152,6 +156,7 @@ export function TopBar({ model, setModel, onStatus }: Props) {
         open={pullOpen}
         onClose={() => setPullOpen(false)}
         installedModels={status.models.filter((m) => !m.includes("(mock)"))}
+        modelDetails={status.modelDetails}
         onModelAdded={(m) => {
           refreshStatus();
           if (m) setModel(m);

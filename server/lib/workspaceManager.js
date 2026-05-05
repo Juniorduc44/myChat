@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_DIR = path.resolve(__dirname, "../../workspace-template");
-const WORKSPACES_ROOT = path.join(os.homedir(), "ollama-chat-workspaces");
+export const WORKSPACES_ROOT = process.env.OLLAMA_CHAT_WORKSPACES
+  ? path.resolve(process.env.OLLAMA_CHAT_WORKSPACES)
+  : path.join(os.homedir(), "ollama-chat-workspaces");
 const CONFIG_DIR = path.join(os.homedir(), ".config", "ollama-chat");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
@@ -72,6 +74,18 @@ export function scaffoldWorkspace(name, overrides = {}) {
 
 export function getWorkspaceDir(name) {
   return path.join(WORKSPACES_ROOT, name);
+}
+
+export function getSettings() {
+  const cfg = readConfig();
+  return {
+    workspaceRoot: WORKSPACES_ROOT,
+    trustedDirs: cfg.trustedDirs ?? [],
+  };
+}
+
+export function saveSettings({ trustedDirs = [] } = {}) {
+  writeConfig({ ...readConfig(), trustedDirs });
 }
 
 export function ensureDefaultWorkspace() {

@@ -35,6 +35,9 @@ import {
   getWorkspaceDir,
   listWorkspaces,
   scaffoldWorkspace,
+  getSettings,
+  saveSettings,
+  WORKSPACES_ROOT,
 } from "./lib/workspaceManager.js";
 import { loadWorkspace, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile } from "./lib/workspace.js";
 import { searchFTS } from "./lib/retrieval.js";
@@ -134,6 +137,44 @@ async function ollamaChatStreamRest(model, messages, onChunk) {
   return 0;
 }
 
+// Fetch per-model metadata from Ollama REST API (capabilities, size, paramSize, etc.)
+async function fetchOllamaModelDetails() {
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return {};
+    const data = await r.json();
+    const models = data.models ?? [];
+    const details = {};
+    await Promise.all(
+      models.map(async (m) => {
+        const name = m.name;
+        const isCloud = name.endsWith(":cloud");
+        const sizeGB = (!isCloud && m.size) ? +(m.size / 1e9).toFixed(1) : undefined;
+        const paramSize = m.details?.parameter_size;
+        const family = m.details?.family;
+        const quantization = m.details?.quantization_level;
+        let capabilities = [];
+        try {
+          const sr = await fetch(`${OLLAMA_HOST}/api/show`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name }),
+            signal: AbortSignal.timeout(4000),
+          });
+          if (sr.ok) {
+            const sd = await sr.json();
+            capabilities = (sd.capabilities ?? []).filter((c) => c !== "completion");
+          }
+        } catch { /* show failed — leave caps empty */ }
+        details[name] = { capabilities, sizeGB, paramSize, family, quantization, isCloud };
+      }),
+    );
+    return details;
+  } catch {
+    return {};
+  }
+}
+
 // Check whether a model advertises the "tools" capability via Ollama REST API.
 async function checkModelSupportsTools(model) {
   try {
@@ -167,6 +208,7 @@ async function ollamaChatNoStream(model, messages, tools) {
 async function runWsBuilderWithTools(workspaceName, wsDir, model, messages, reply) {
   const write = (obj) => reply.raw.write(JSON.stringify(obj) + "\n");
   let wsCreated = false;
+  const writtenFiles = [];
   const loopMessages = [...messages];
 
   for (let i = 0; i < 30; i++) {
@@ -212,6 +254,7 @@ async function runWsBuilderWithTools(workspaceName, wsDir, model, messages, repl
           const fullPath = path.join(wsDir, filename);
           mkdirSync(path.dirname(fullPath), { recursive: true });
           writeFileSync(fullPath, content, "utf8");
+          writtenFiles.push(filename);
           write({ type: "tool_done", tool: "write_workspace_file", filename });
           loopMessages.push({ role: "tool", content: JSON.stringify({ ok: true, path: filename }) });
         } catch (e) {
@@ -220,7 +263,7 @@ async function runWsBuilderWithTools(workspaceName, wsDir, model, messages, repl
         }
       } else if (name === "finish_workspace") {
         const { summary } = args;
-        write({ type: "workspace_saved", name: workspaceName, summary });
+        write({ type: "workspace_saved", name: workspaceName, path: wsDir, files: writtenFiles, summary });
         write({ type: "done", tokensOut: res.eval_count ?? 0 });
         return;
       }
@@ -238,8 +281,13 @@ function activeConfig() {
 
 // --- Routes ---------------------------------------------------------------
 fastify.get("/api/status", async () => {
-  const [installed, gpuAvailable] = await Promise.all([ollamaInstalled(), detectGpu()]);
-  const models = installed ? await ollamaModels() : [];
+  const [installed, gpuAvailable, modelDetails] = await Promise.all([
+    ollamaInstalled(), detectGpu(), fetchOllamaModelDetails(),
+  ]);
+  const detailKeys = Object.keys(modelDetails);
+  const models = installed
+    ? (detailKeys.length > 0 ? detailKeys : await ollamaModels())
+    : [];
   const dir = getActiveWorkspaceDir();
   const cfg = loadWorkspace(dir);
   return {
@@ -251,6 +299,7 @@ fastify.get("/api/status", async () => {
     workspace: dir,
     activeWorkspace: getActiveWorkspaceName(),
     defaultModel: cfg.model || "llama3",
+    modelDetails,
   };
 });
 
@@ -344,9 +393,31 @@ fastify.get("/api/models/capabilities", async (req, reply) => {
   const { model } = req.query;
   if (!model?.trim()) return reply.code(400).send({ error: "model required" });
   const installed = await ollamaInstalled();
-  if (!installed) return { tools: false, reason: "ollama_not_installed" };
-  const tools = await checkModelSupportsTools(model.trim());
-  return { tools, model: model.trim() };
+  if (!installed) return { tools: false, capabilities: [], reason: "ollama_not_installed" };
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/show`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: model.trim() }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!r.ok) return { tools: false, capabilities: [], model: model.trim() };
+    const data = await r.json();
+    const capabilities = (data.capabilities ?? []).filter((c) => c !== "completion");
+    return { tools: capabilities.includes("tools"), capabilities, model: model.trim() };
+  } catch {
+    return { tools: false, capabilities: [], model: model.trim() };
+  }
+});
+
+// --- App settings (workspace root + trusted directories) ------------------
+fastify.get("/api/settings", async () => getSettings());
+
+fastify.put("/api/settings", async (req, reply) => {
+  const { trustedDirs } = req.body ?? {};
+  if (!Array.isArray(trustedDirs)) return reply.code(400).send({ error: "trustedDirs must be an array" });
+  saveSettings({ trustedDirs: trustedDirs.filter((d) => typeof d === "string" && d.trim()) });
+  return { ok: true };
 });
 
 // --- Workspace builder (AI-assisted workspace creation) -------------------
