@@ -192,6 +192,87 @@ async function checkModelSupportsTools(model) {
   }
 }
 
+// Browser-harness skill tool definition
+const BROWSER_HARNESS_TOOL = {
+  type: "function",
+  function: {
+    name: "run_browser_harness",
+    description:
+      "Execute browser automation Python code via the browser-harness CLI. All helpers (new_tab, wait_for_load, capture_screenshot, click_at_xy, js, page_info, http_get, etc.) are pre-imported. Use new_tab(url) for first navigation; goto_url only for subsequent navigations in the same tab. print() output is captured as the tool result.",
+    parameters: {
+      type: "object",
+      required: ["code"],
+      properties: {
+        code: {
+          type: "string",
+          description:
+            "Python code to execute. Multi-line OK. Call print() to return information to the model. Example:\n  new_tab('https://example.com')\n  wait_for_load()\n  print(page_info())",
+        },
+      },
+    },
+  },
+};
+
+// Agentic chat loop with browser-harness tool support.
+async function runChatWithBrowserHarness(prompt, history, task, model, reply) {
+  const write = (obj) => reply.raw.write(JSON.stringify(obj) + "\n");
+
+  const systemContent =
+    prompt.composed +
+    "\n\nYou have access to a live browser via the `run_browser_harness` tool. Use it to look up current information, browse websites, or verify facts when needed. After each tool call, reason about the output before responding.";
+
+  const messages = [
+    { role: "system", content: systemContent },
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user", content: task },
+  ];
+
+  for (let i = 0; i < 20; i++) {
+    let res;
+    try {
+      res = await ollamaChatNoStream(model, messages, [BROWSER_HARNESS_TOOL]);
+    } catch (e) {
+      write({ type: "error", message: e.message });
+      return;
+    }
+
+    const msg = res.message;
+    messages.push(msg);
+
+    // No tool calls → final answer
+    if (!msg.tool_calls?.length) {
+      if (msg.content) write({ type: "delta", text: msg.content });
+      write({ type: "done", tokensOut: res.eval_count ?? 0 });
+      return;
+    }
+
+    // Execute each tool call
+    for (const tc of msg.tool_calls) {
+      const { name, arguments: args } = tc.function;
+      if (name === "run_browser_harness") {
+        const { code } = args;
+        write({ type: "tool_call", tool: "browser_harness", filename: "browser" });
+        try {
+          const result = await execa("browser-harness", ["-c", code], { timeout: 60_000 });
+          const output = [result.stdout, result.stderr ? `[stderr]: ${result.stderr}` : ""]
+            .filter(Boolean)
+            .join("\n")
+            .trim();
+          write({ type: "tool_result", text: output || "(no output)" });
+          messages.push({ role: "tool", content: JSON.stringify({ ok: true, output }) });
+        } catch (e) {
+          const errMsg = [e.stdout, e.stderr, e.message].filter(Boolean).join("\n").trim();
+          write({ type: "tool_result", text: `Error: ${errMsg}` });
+          messages.push({ role: "tool", content: JSON.stringify({ ok: false, error: errMsg }) });
+        }
+        write({ type: "tool_done", tool: "browser_harness", filename: "browser" });
+      }
+    }
+  }
+
+  write({ type: "error", message: "Browser harness loop reached max iterations without finishing." });
+}
+
 // Single non-streaming Ollama chat request (for tool-calling agentic loop).
 async function ollamaChatNoStream(model, messages, tools) {
   const r = await fetch(`${OLLAMA_HOST}/api/chat`, {
@@ -542,7 +623,7 @@ fastify.post("/api/search", async (req) => {
 fastify.post("/api/chat", async (req, reply) => {
   const dir = getActiveWorkspaceDir();
   const cfg = activeConfig();
-  const { task, history = [], model = cfg.model || "llama3", attachments = [] } = req.body ?? {};
+  const { task, history = [], model = cfg.model || "llama3", attachments = [], browserHarness = false } = req.body ?? {};
 
   // Prepend text/pdf attachment content to the task
   let augmentedTask = task;
@@ -575,6 +656,28 @@ fastify.post("/api/chat", async (req, reply) => {
     reply.raw.write(JSON.stringify({ type: "done", tokensOut: approxTokens(fallback) }) + "\n");
     reply.raw.end();
     return;
+  }
+
+  // Browser-harness agentic path
+  if (browserHarness && installed) {
+    const supportsTools = await checkModelSupportsTools(model);
+    if (supportsTools) {
+      try {
+        await runChatWithBrowserHarness(prompt, history, augmentedTask || task, model, reply);
+      } catch (e) {
+        reply.raw.write(JSON.stringify({ type: "error", message: e.message }) + "\n");
+      } finally {
+        reply.raw.end();
+      }
+      return;
+    }
+    // Model doesn't support tools — fall through to regular streaming with a warning in the prompt
+    reply.raw.write(
+      JSON.stringify({
+        type: "delta",
+        text: `⚠️ Browser skill requires a tools-capable model. **${model}** doesn't support tool calls — continuing without browser access.\n\n`,
+      }) + "\n",
+    );
   }
 
   try {

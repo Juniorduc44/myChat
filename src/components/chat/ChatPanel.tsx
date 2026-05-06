@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Send, Sparkles, Loader2, Paperclip, X, FileText, AlertCircle } from "lucide-react";
+import { Send, Sparkles, Loader2, Paperclip, X, FileText, AlertCircle, Globe2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -50,6 +50,10 @@ export function ChatPanel({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Browser-harness skill toggle
+  const [browserHarnessOn, setBrowserHarnessOn] = useState(false);
+  const modelSupportsTools = hasCapability(model, "tools");
 
   // Rename dialog
   const [renameOpen, setRenameOpen] = useState(false);
@@ -202,7 +206,7 @@ export function ChatPanel({
         });
         emitFileBlocks(acc);
       } else {
-        for await (const event of chatStream(task, messages, model, snap)) {
+        for await (const event of chatStream(task, messages, model, snap, browserHarnessOn)) {
           if (event.type === "prompt") {
             setLastPrompt(event.prompt as AssembledPrompt);
           } else if (event.type === "delta") {
@@ -310,6 +314,26 @@ export function ChatPanel({
               title="Attach file (PDF, TXT, MD, image)"
             >
               {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+            </Button>
+
+            {/* Browser-harness skill toggle */}
+            <Button
+              variant={browserHarnessOn ? "default" : "outline"}
+              size="sm"
+              className="h-[60px] w-10 p-0 shrink-0"
+              onClick={() => setBrowserHarnessOn((v) => !v)}
+              disabled={busy || mockMode || !modelSupportsTools}
+              title={
+                mockMode
+                  ? "Browser skill unavailable in mock mode"
+                  : !modelSupportsTools
+                  ? "Browser skill requires a tools-capable model (e.g. llama3.1)"
+                  : browserHarnessOn
+                  ? "Browser skill ON — click to disable"
+                  : "Enable browser skill (uses browser-harness)"
+              }
+            >
+              <Globe2 className="w-4 h-4" />
             </Button>
 
             <div className="flex-1 relative">

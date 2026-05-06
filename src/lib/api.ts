@@ -205,7 +205,8 @@ export type NdjsonEvent =
   | { type: "workspace_created"; name: string }
   | { type: "tool_call"; tool: string; filename: string }
   | { type: "tool_done"; tool: string; filename: string }
-  | { type: "workspace_saved"; name: string; summary: string; path?: string; files?: string[] };
+  | { type: "workspace_saved"; name: string; summary: string; path?: string; files?: string[] }
+  | { type: "tool_result"; text: string };
 
 export async function uploadAttachment(file: File): Promise<import("./types").Attachment> {
   const form = new FormData();
@@ -231,6 +232,7 @@ export async function* chatStream(
   history: ChatMessage[],
   model: string,
   attachments: import("./types").Attachment[] = [],
+  browserHarness = false,
 ): AsyncGenerator<NdjsonEvent> {
   const r = await fetch(`${BASE}/chat`, {
     method: "POST",
@@ -240,6 +242,7 @@ export async function* chatStream(
       history: history.map((m) => ({ role: m.role, content: m.content })),
       model,
       attachments: attachments.map((a) => ({ type: a.type, name: a.name, content: a.content })),
+      browserHarness,
     }),
   });
   if (!r.ok || !r.body) throw new Error(`/api/chat returned ${r.status}`);
