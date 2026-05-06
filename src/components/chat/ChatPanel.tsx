@@ -208,14 +208,30 @@ export function ChatPanel({
         });
         emitFileBlocks(acc);
       } else {
+        // browserHeader accumulates tool-call activity above the LLM text
+        let browserHeader = "";
+        let llmText = "";
+
+        const updateContent = () => {
+          acc = browserHeader + llmText;
+          setMessages((prev) =>
+            prev.map((m) => m.id === assistantId ? { ...m, content: acc, tokensOut: mockTokenCount(llmText) } : m),
+          );
+        };
+
         for await (const event of chatStream(task, messages, model, snap, browserHarnessOn)) {
           if (event.type === "prompt") {
             setLastPrompt(event.prompt as AssembledPrompt);
+          } else if (event.type === "tool_call" && event.tool === "browser_harness") {
+            browserHeader += `> 🌐 **Browser skill running…**\n\n`;
+            updateContent();
+          } else if (event.type === "tool_result") {
+            const lines = event.text.split("\n").map((l: string) => `> ${l}`).join("\n");
+            browserHeader += `> **Browser output:**\n${lines}\n\n---\n\n`;
+            updateContent();
           } else if (event.type === "delta") {
-            acc += event.text;
-            setMessages((prev) =>
-              prev.map((m) => m.id === assistantId ? { ...m, content: acc, tokensOut: mockTokenCount(acc) } : m),
-            );
+            llmText += event.text;
+            updateContent();
           } else if (event.type === "done") {
             setMessages((prev) => {
               const next = prev.map((m) =>
@@ -226,7 +242,8 @@ export function ChatPanel({
             });
             emitFileBlocks(acc);
           } else if (event.type === "error") {
-            acc += `\n\n⚠️ ${event.message}`;
+            llmText += `\n\n⚠️ ${event.message}`;
+            updateContent();
             setMessages((prev) => {
               const next = prev.map((m) => m.id === assistantId ? { ...m, content: acc } : m);
               onSessionUpdate?.(next);
