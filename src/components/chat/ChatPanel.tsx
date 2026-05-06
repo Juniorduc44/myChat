@@ -15,7 +15,7 @@ import { TokenStats } from "./TokenStats";
 import { PromptInspector } from "./PromptInspector";
 import { parseFileBlocks } from "./ArtifactPanel";
 import { assemblePrompt, mockStream, mockTokenCount } from "@/lib/mockOllama";
-import { chatStream, uploadAttachment } from "@/lib/api";
+import { chatStream, uploadAttachment, launchBrowser } from "@/lib/api";
 import { hasCapability } from "@/lib/capabilities";
 import type { ChatMessage as ChatMessageT, AssembledPrompt, ArtifactFile, Attachment } from "@/lib/types";
 
@@ -55,7 +55,18 @@ export function ChatPanel({
 
   // Browser-harness skill toggle
   const [browserHarnessOn, setBrowserHarnessOn] = useState(false);
+  const [browserLaunching, setBrowserLaunching] = useState(false);
   const modelSupportsTools = hasCapability(model, "tools", ollamaCaps);
+
+  async function toggleBrowserHarness() {
+    const next = !browserHarnessOn;
+    setBrowserHarnessOn(next);
+    if (next) {
+      setBrowserLaunching(true);
+      await launchBrowser();
+      setBrowserLaunching(false);
+    }
+  }
 
   // Rename dialog
   const [renameOpen, setRenameOpen] = useState(false);
@@ -340,19 +351,21 @@ export function ChatPanel({
               variant={browserHarnessOn ? "default" : "outline"}
               size="sm"
               className="h-[60px] w-10 p-0 shrink-0"
-              onClick={() => setBrowserHarnessOn((v) => !v)}
-              disabled={busy || mockMode || !modelSupportsTools}
+              onClick={toggleBrowserHarness}
+              disabled={busy || mockMode || !modelSupportsTools || browserLaunching}
               title={
                 mockMode
                   ? "Browser skill unavailable in mock mode"
                   : !modelSupportsTools
                   ? "Browser skill requires a tools-capable model (e.g. llama3.1)"
+                  : browserLaunching
+                  ? "Opening Chrome…"
                   : browserHarnessOn
                   ? "Browser skill ON — click to disable"
-                  : "Enable browser skill (uses browser-harness)"
+                  : "Enable browser skill — opens Chrome"
               }
             >
-              <Globe2 className="w-4 h-4" />
+              {browserLaunching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe2 className="w-4 h-4" />}
             </Button>
 
             <div className="flex-1 relative">

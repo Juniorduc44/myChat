@@ -709,6 +709,29 @@ fastify.post("/api/chat", async (req, reply) => {
   }
 });
 
+// --- Browser-harness -------------------------------------------------------
+// POST /api/browser-harness/launch — open Chrome to chrome://inspect so the
+// user can click Allow and enable DevTools access for browser-harness.
+fastify.post("/api/browser-harness/launch", async (_req, reply) => {
+  const candidates = ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"];
+  for (const bin of candidates) {
+    try {
+      // --new-window forces a visible window; chrome://inspect is where Allow lives
+      execa(bin, ["--new-window", "chrome://inspect"], { detached: true, stdio: "ignore" });
+      return { ok: true, browser: bin };
+    } catch {
+      // try next candidate
+    }
+  }
+  // Last resort: let the `open` package handle it
+  try {
+    await open("chrome://inspect");
+    return { ok: true, browser: "system-default" };
+  } catch (e) {
+    return reply.code(500).send({ error: `Could not open Chrome: ${e.message}` });
+  }
+});
+
 // --- Model management -----------------------------------------------------
 fastify.post("/api/models/pull", async (req, reply) => {
   const { model } = req.body ?? {};

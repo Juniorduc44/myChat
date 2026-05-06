@@ -261,6 +261,15 @@ export async function* chatStream(
   }
 }
 
+export async function launchBrowser(): Promise<{ ok: boolean; browser?: string; error?: string }> {
+  try {
+    const r = await fetch(`${BASE}/browser-harness/launch`, { method: "POST" });
+    return r.json();
+  } catch {
+    return { ok: false, error: "backend unreachable" };
+  }
+}
+
 export async function fetchSettings(): Promise<import("./types").AppSettings> {
   const r = await fetch(`${BASE}/settings`);
   if (!r.ok) return { workspaceRoot: "~/ollama-chat-workspaces", trustedDirs: [] };
