@@ -22,6 +22,7 @@ import type { ChatMessage as ChatMessageT, AssembledPrompt, ArtifactFile, Attach
 interface Props {
   model: string;
   mockMode: boolean;
+  ollamaCaps?: string[];
   initialMessages?: ChatMessageT[];
   onSessionUpdate?: (messages: ChatMessageT[]) => void;
   onFileBlocks?: (files: ArtifactFile[]) => void;
@@ -34,6 +35,7 @@ const ACCEPTED_TYPES = ".pdf,.txt,.md,.png,.jpg,.jpeg,.gif,.webp";
 export function ChatPanel({
   model,
   mockMode,
+  ollamaCaps = [],
   initialMessages = [],
   onSessionUpdate,
   onFileBlocks,
@@ -53,7 +55,7 @@ export function ChatPanel({
 
   // Browser-harness skill toggle
   const [browserHarnessOn, setBrowserHarnessOn] = useState(false);
-  const modelSupportsTools = hasCapability(model, "tools");
+  const modelSupportsTools = hasCapability(model, "tools", ollamaCaps);
 
   // Rename dialog
   const [renameOpen, setRenameOpen] = useState(false);
@@ -65,7 +67,7 @@ export function ChatPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  const modelSupportsVision = hasCapability(model, "vision");
+  const modelSupportsVision = hasCapability(model, "vision", ollamaCaps);
   const hasImageAttachment = attachments.some((a) => a.type === "image");
   const visionWarning = hasImageAttachment && !modelSupportsVision && !mockMode;
 

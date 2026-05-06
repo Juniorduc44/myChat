@@ -240,6 +240,7 @@ const Index = () => {
                   key={`${activeSession.id}-${activeWorkspace}`}
                   model={model}
                   mockMode={mockMode}
+                  ollamaCaps={status.modelDetails?.[model]?.capabilities ?? []}
                   initialMessages={activeSession.messages}
                   onSessionUpdate={handleSessionUpdate}
                   onFileBlocks={handleFileBlocks}
