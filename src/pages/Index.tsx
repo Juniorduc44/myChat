@@ -31,7 +31,7 @@ import type {
 } from "@/lib/types";
 
 const Index = () => {
-  const [model, setModel] = useState("llama3 (mock)");
+  const [model, setModel] = useState("llama3.1:8b");
   const [status, setStatus] = useState<BackendStatus>({
     reachable: false,
     ollamaInstalled: false,
@@ -177,8 +177,10 @@ const Index = () => {
         onStatus={(s) => {
           setStatus(s);
           if (s.reachable && s.models.length > 0) {
-            setModel(s.models[0]);
-            setActiveSession((prev) => ({ ...prev, model: s.models[0] }));
+            const preferred =
+              s.models.find((m) => m.startsWith("llama3.1")) ?? s.models[0];
+            setModel(preferred);
+            setActiveSession((prev) => ({ ...prev, model: preferred }));
           }
         }}
       />

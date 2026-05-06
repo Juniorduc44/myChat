@@ -519,13 +519,11 @@ export function buildWsBuilderMessages(task, history, mode, workspaceName) {
   const messages = [{ role: "system", content: toolSystem }];
 
   if (workspaceName && mode === "manual" && history.length === 0) {
+    // End on a user turn so Ollama generates Question 1 rather than returning empty.
+    // Pre-canned assistant openers caused tokensOut:1 (model had nothing to respond to).
     messages.push({
       role: "user",
-      content: `The workspace name will be: ${workspaceName}. Please start the guided setup.`,
-    });
-    messages.push({
-      role: "assistant",
-      content: `Got it — I'll build the "${workspaceName}" workspace following the Clief Notes 1.3 SOP.\n\nThe folder is memory, the prompt is direction. I'll ask a few questions to figure out exactly which files you need.\n\n**Question 1:** What is this workspace for? Describe the project or recurring job in 2-3 sentences.\n\n**Examples:**\n• "A LinkedIn content creator for cybersecurity professionals — 3 posts per week on zero-day vulnerabilities and threat intelligence."\n• "A Python code review assistant for my data pipeline team."\n• "A recipe blog writer focused on Mediterranean vegetarian cuisine."`,
+      content: `The workspace name will be: ${workspaceName}. Please start the guided setup now — introduce yourself briefly and ask Question 1 with examples.`,
     });
   } else {
     for (const m of history) {
